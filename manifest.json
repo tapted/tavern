@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "Tavern",
+  "short_name": "Tavern",
+  "version": "0.2",
+  "minimum_chrome_version": "23",
+  "icons": {"128": "images/tavern_icon.png"},
+  "app": {
+    "background": {
+      "scripts": ["js/main.js"]
+    }
+  },
+  "permissions": [
+    {"fileSystem": ["write", "retainEntries", "directory"]},
+    "storage",
+    "http://pajamallama0.syd.corp.google.com:8080/"
+  ]
+}

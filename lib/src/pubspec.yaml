@@ -1,0 +1,14 @@
+name: tavern
+
+dependencies:
+  chrome_gen: any
+  path: any
+  js: any
+  stack_trace: any
+  analyzer: any
+  crypto: any
+  collection_helpers: any
+  yaml: any
+  source_maps: any
+  watcher: any
+  oauth2: any
