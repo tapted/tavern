@@ -1,0 +1,42 @@
+html, body {
+  height: 100%;
+  text-align: center;
+}
+
+#logtext {
+  border: 1px solid;
+  height: 70%;
+  margin: auto;
+  overflow-y: scroll;
+  text-align: left;
+  width: 80%;
+}
+
+.bold {
+  font-weight: bold;
+}
+
+.log {
+  font-size: 12pt;
+  white-space: pre-wrap;
+}
+
+.log_ERR {
+  color: red;
+}
+
+.log_FINE {
+  color: green;
+}
+
+.log_IO {
+  color: blue;
+}
+
+.log_MSG {
+  color: black;
+}
+
+.log_SLVR {
+  color: purple;
+}

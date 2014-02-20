@@ -8,11 +8,14 @@ import 'dart:async';
 
 import 'package:path/path.dart' as path;
 
-import '../git.dart' as git;
 import '../io.dart';
+import '../log.dart' as log;
 import '../package.dart';
+import '../path_rep.dart';
 import '../source.dart';
 import '../utils.dart';
+import '../wrap/git_wrap.dart' as git;
+import '../wrap/http_wrap.dart';
 
 /// A package source that gets packages from Git repos.
 class GitSource extends Source {
@@ -39,32 +42,52 @@ class GitSource extends Source {
 
     return git.isInstalled.then((installed) {
       if (!installed) {
-        throw new Exception(
-            "Cannot get '${id.name}' from Git (${_getUrl(id)}).\n"
-            "Please ensure Git is correctly installed.");
-      }
+        // If git is not installed, and the url is on github, try downloading
+        // a snapshot of HEAD via the github APIs.
+        Uri gitUri = Uri.parse(_getUrl(id));
 
+        // Check the url points to github, otherwise give up.
+        if (gitUri.host != "github.com") {
+          throw new Exception(
+              "Cannot get '${id.name}' from Git (${_getUrl(id)}).\n"
+              "Please ensure Git is correctly installed.");
+        }
+
+        String user = gitUri.pathSegments[0];
+        String repo = gitUri.pathSegments[1].split(".")[0];
+
+        var url = "https://api.github.com/repos/$user/$repo/tarball";
+        log.io("Downloading ${id.name} ${id.version} from $url...");
+
+        PathRep path = FileSystem.workingDir.path.join(
+            "cache", "git", id.name);
+
+        return Future.wait([Directory.create(path),
+                            httpClient.read(url, responseType: "arraybuffer")])
+            .then((res) => res[0].extractArchive(res[1], skipTopDir: true))
+            .then((_) => Package.load(id.name, path, systemCache.sources));
+      }
       ensureDir(path.join(systemCacheRoot, 'cache'));
-      return _ensureRepoCache(id);
-    }).then((_) => systemCacheDirectory(id)).then((path) {
-      revisionCachePath = path;
-      if (entryExists(revisionCachePath)) return null;
-      return _clone(_repoCachePath(id), revisionCachePath, mirror: false);
-    }).then((_) {
-      var ref = _getEffectiveRef(id);
-      if (ref == 'HEAD') return null;
-      return _checkOut(revisionCachePath, ref);
-    }).then((_) {
-      return new Package.load(id.name, revisionCachePath, systemCache.sources);
+      return _ensureRepoCache(id)
+          .then((_) => systemCacheDirectory(id)).then((path) {
+            revisionCachePath = path;
+            if (entryExists(revisionCachePath)) return null;
+            return _clone(_repoCachePath(id),
+                revisionCachePath, mirror: false);
+          }).then((_) {
+            var ref = _getEffectiveRef(id);
+            if (ref == 'HEAD') return null;
+            return _checkOut(revisionCachePath, ref);
+          }).then((_) {
+            return Package.load(id.name, revisionCachePath,
+                systemCache.sources);
+          });
     });
   }
 
   /// Returns the path to the revision-specific cache of [id].
   Future<String> systemCacheDirectory(PackageId id) {
-    return _revisionAt(id).then((rev) {
-      var revisionCacheName = '${id.name}-$rev';
-      return path.join(systemCacheRoot, revisionCacheName);
-    });
+    return new Future.value(systemCacheRoot.join('git', id.name));
   }
 
   /// Ensures [description] is a Git URL.
@@ -106,7 +129,9 @@ class GitSource extends Source {
   }
 
   /// Attaches a specific commit to [id] to disambiguate it.
-  Future<PackageId> resolveId(PackageId id) {
+  // TODO(pajamallama): Rename this back to resolveId once the commit hash
+  // can be fetched.
+  Future<PackageId> resolveGitId(PackageId id) {
     return _revisionAt(id).then((revision) {
       var description = {'url': _getUrl(id), 'ref': _getRef(id)};
       description['resolved-ref'] = revision;

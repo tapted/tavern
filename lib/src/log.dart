@@ -35,7 +35,7 @@ Timer _progressTimer;
 String _progressMessage;
 
 /// Stores additional functions to call when a message is being logged.
-List<Function> _otherLogFunctions = new List<Function>();
+Set<Function> _otherLogFunctions = new LinkedHashSet<Function>();
 
 final _cyan = getSpecial('\u001b[36m');
 final _green = getSpecial('\u001b[32m');

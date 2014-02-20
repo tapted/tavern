@@ -5,22 +5,22 @@ import 'dart:convert';
 import 'dart:html' show Blob;
 import 'dart:typed_data';
 
-import 'package:chrome_gen/chrome_app.dart' as chrome;
-import 'package:js/js.dart' as js;
+import 'package:archive/archive.dart';
+import 'package:chrome/chrome_app.dart' as chrome;
+import 'package:range/range.dart';
 
 import '../log.dart' as log;
 import '../path_rep.dart';
 
-// Extension of the Archive files being used (uncompressed zip).
-const String ARCHIVE = "zip";
+// Extension of the Archive files being used (tarball).
+const String ARCHIVE = "tar.gz";
 
 /// A collection of static methods for accessing important parts of the local
 /// filesystem.
 class FileSystem {
-  static Directory _workingDir;
-  static Directory get workingDir => _workingDir;
+  static Directory workingDir;
+  static PathRep workingDirPath() => workingDir.path;
   static const String STORAGE_KEY = "WORKING_DIR";
-  static PathRep workingDirPath() => _workingDir.path;
 
   /// Ask the user to select a directory from a file selection widget.
   static Future<Directory> obtainDirectory() {
@@ -43,14 +43,14 @@ class FileSystem {
 
       return chrome.fileSystem.restoreEntry(map[STORAGE_KEY])
           .then((entry) => new Directory(entry))
-          ..then((dir) => _workingDir = dir)
+          ..then((dir) => workingDir = dir)
           .catchError((_) => null);
     });
   }
 
   /// Sets the working directory to [dir] in the local storage.
   static void persistWorkingDirectory(Directory dir) {
-    _workingDir = dir;
+    workingDir = dir;
     if (chrome.storage.available) {
       String entryID = chrome.fileSystem.retainEntry(dir.getEntry());
       chrome.storage.local.set({STORAGE_KEY: entryID});
@@ -78,14 +78,14 @@ abstract class FileSystemEntity {
       file ? new Future.value(file) : Directory.load(path));
   }
 
-  Future copyTo(PathRep dir) {
+  Future copyTo(PathRep dir, {String name}) {
     return Directory.create(dir).then(
-        (newParent) => getEntry().copyTo(newParent.getEntry()));
+        (newParent) => getEntry().copyTo(newParent.getEntry(), name: name));
   }
 
-  Future moveTo(PathRep dir) {
+  Future moveTo(PathRep dir, {String name}) {
     return Directory.create(dir).then(
-        (newParent) => getEntry().moveTo(newParent.getEntry()));
+        (newParent) => getEntry().moveTo(newParent.getEntry(), name: name));
   }
 
   Future remove();
@@ -125,7 +125,8 @@ class File extends FileSystemEntity {
 
   Future<String> readText() => _entry.readText();
 
-  Future<bool> write(var data) => _entry.writeBytes(data);
+  Future write(Uint8List data) =>
+      _entry.writeBytes(new chrome.ArrayBuffer.fromBytes(data));
 
   Future writeText(String s) => _entry.writeText(s);
 }
@@ -202,14 +203,34 @@ class Directory extends FileSystemEntity {
   }
 
   /// Extract the archive inside the current directory.
-  Future<bool> extractArchive(var data) {
-    var completer = new Completer();
+  Future extractArchive(ByteBuffer data, {bool skipTopDir: false}) {
+    log.message("Extracting zipped data to $path.");
 
-    js.context["Archive"].extractZipFile(data,
-                                         _entry.jsProxy,
-                                         (res) => completer.complete(res));
+    Uint8List gzData = new Uint8List.view(data);
+    List<int> tarData = (new GZipDecoder()).decodeBytes(gzData);
+    Archive archive = (new TarDecoder()).decodeBytes(tarData);
 
-    return completer.future;
+    return Future.forEach(archive.files, (zipFile) {
+      var zipFilename = zipFile.filename;
+      // If the zip file has all its contents inside a top directory then
+      // sometimes we want to extract them up a level.
+      if (skipTopDir) {
+        var parts = zipFilename.split('/');
+
+        // Skip files in the top directory
+        if (parts.length == 1)
+          return;
+
+        parts.removeAt(0);
+        zipFilename = parts.join('/');
+      }
+      var path = getPath().join(zipFilename);
+
+      if (zipFile.fileSize > 0)
+        return File.create(path).then((file) => file.write(zipFile.content));
+      else
+        return Directory.create(path);
+    });
   }
 }
 
@@ -285,12 +306,33 @@ StdioType stdioType(object) {
   return StdioType.PIPE;
 }
 
-class TimeoutException extends Exception {
-  TimeoutException([dynamic message]);
-}
+class SocketException implements Exception {
+  final String message;
+  final OSError osError;
+  final InternetAddress address;
+  final int port;
 
-class SocketException extends Exception {
-  SocketException([dynamic message]);
+  const SocketException(this.message, {this.osError, this.address, this.port});
+
+  String toString() {
+    StringBuffer sb = new StringBuffer();
+    sb.write("SocketException");
+    if (!message.isEmpty) {
+      sb.write(": $message");
+      if (osError != null) {
+        sb.write(" ($osError)");
+      }
+    } else if (osError != null) {
+      sb.write(": $osError");
+    }
+    if (address != null) {
+      sb.write(", address = ${address.host}");
+    }
+    if (port != null) {
+      sb.write(", port = $port");
+    }
+    return sb.toString();
+  }
 }
 
 /// Whether pub is running from within the Dart SDK, as opposed to from the Dart
@@ -308,8 +350,11 @@ Future createSymlinkNative(PathRep target, PathRep symlink,
                            {bool relative: false}) {
   log.fine("Creating $symlink pointing to $target");
   return Directory.load(target).then((from) {
-    if (from != null) return from.copyTo(symlink);
-    log.error("Target of symlink doesn't exists");
+    if (from == null) {
+      log.error("Can't create symlink to target folder: $target");
+      return null;
+    }
+    return from.copyTo(symlink.dirname, name: symlink.basename);
   });
 }
 
@@ -324,4 +369,34 @@ Future createSymlinkNative(PathRep target, PathRep symlink,
 // this is called, and implement properly.
 PathRep canonicalizeNative(PathRep path) {
   return path;
+}
+
+/**
+ * A Mock of the dart:io/process.dart Process class.
+ */
+abstract class Process {
+  Future<int> exitCode;
+  static Future<ProcessResult> run(
+      String executable,
+      List<String> arguments,
+      {String workingDirectory,
+       Map<String, String> environment,
+       bool includeParentEnvironment: true,
+       bool runInShell: false,
+       Encoding stdoutEncoding,
+       Encoding stderrEncoding}) {}
+  Stream<List<int>> get stdout;
+  Stream<List<int>> get stderr;
+  IOSink get stdin;
+  bool kill([ProcessSignal signal = ProcessSignal.SIGTERM]);
+}
+
+/**
+ * A Mock of the dart:io/process.dart ProcessSignal class.
+ */
+class ProcessSignal {
+  static const ProcessSignal SIGTERM = const ProcessSignal._(15, "SIGTERM");
+  final int _signalNumber;
+  final String _name;
+  const ProcessSignal._(this._signalNumber, this._name);
 }

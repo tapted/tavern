@@ -80,14 +80,18 @@ def CheckChangeOnCommit(input_api, output_api):
         ['git', 'rev-parse', '--abbrev-ref', 'HEAD']).strip()
     remote = subprocess.check_output(
         ['git', 'config', 'branch.%s.remote' % branch]).strip()
-    if (remote != 'origin'):
+    upstream = subprocess.check_output(
+        ['git', 'config', 'branch.%s.merge' % branch]).strip()
+    if remote != 'origin' or upstream != 'refs/head/master':
       set_remote = raw_input(
-          'Remote (%s) should be set to \'origin\', set it now [y|n]?' % remote)
+          'Upstream should be set to \'origin/master\', set it now [y|n]?')
       if (set_remote.startswith('y')):
         subprocess.check_output(
             ['git', 'config', 'branch.%s.remote' % branch, 'origin'])
+        subprocess.check_output(
+            ['git', 'config', 'branch.%s.merge' % branch, 'refs/heads/master'])
       else:
         results.append(output_api.PresubmitError(
-            'Remote must be set to \'origin\' to push to Github.'))
+            'Upstream must be set to \'origin/master\' to push to Github.'))
 
   return results

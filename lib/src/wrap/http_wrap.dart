@@ -3,6 +3,7 @@ library pub.http_wrap;
 import 'dart:async' hide TimeoutException;
 import 'dart:convert';
 import 'dart:html';
+import 'dart:typed_data';
 import '../io.dart';
 import '../log.dart' as log;
 import '../sdk.dart' as sdk;
@@ -26,10 +27,10 @@ class PubHttpClient {
   final completers = new Map<HttpRequest, Completer>();
 
   void decodeResponse(var event, HttpRequest request) {
-    var status = request.status;
     var completer = completers.remove(request);
+    log.io("Received response ${request.statusText} (${request.status}).");
 
-    if (status < 400 || status == 401) {
+    if (request.status < 400 || request.status == 401) {
       completer.complete(request.response);
     } else {
       completer.complete(new PubHttpException());

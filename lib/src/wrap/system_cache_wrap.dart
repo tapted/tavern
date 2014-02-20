@@ -7,6 +7,7 @@ import '../package.dart';
 import '../path_rep.dart';
 import '../source_registry.dart';
 import '../source/hosted.dart';
+import '../source/git.dart';
 import '../source.dart';
 
 class SystemCache {
@@ -35,6 +36,7 @@ class SystemCache {
                                          {bool isOffline: false}) {
     var cache = new SystemCache(rootDir);
     cache.register(new HostedSource());
+    cache.register(new GitSource());
     cache.sources.setDefault('hosted');
     return Directory.create(rootDir).then((_) => cache);
   }
