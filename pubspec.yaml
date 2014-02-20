@@ -1,0 +1,10 @@
+name: tavern
+
+dependencies:
+  archive: any
+  collection_helpers: any
+  chrome: any
+  path: any
+  range: any
+  stack_trace: any
+  yaml: any

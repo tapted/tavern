@@ -1,4 +1,7 @@
 js/pubchrome.dart.*
 pub.zip
 zip/
-lib/jszip.js
+
+packages/
+*packages*
+test/
