@@ -151,7 +151,7 @@ class Entrypoint {
       }).toList());
     }).then((ids) => _saveLockFile(ids))
     .then((_) => _linkSelf())
-    .then((_) => _linkSecondaryPackageDirs())
+    //.then((_) => _linkSecondaryPackageDirs())
     .then((_) => numChanged);
   }
 
@@ -324,7 +324,7 @@ class Entrypoint {
 
       return _linkSecondaryPackageDir(dir)
           .then((_) => _listDirWithoutPackages(dir))
-          .then((List<PathRep> files) {
+          .then((Iterable<PathRep> files) {
             return Future.forEach(
                 files.where((file) => file.isDirectory),
                 _linkSecondaryPackageDir);

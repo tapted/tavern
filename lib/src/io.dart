@@ -228,7 +228,7 @@ Future deleteEntry(PathRep path) {
 Future cleanDir(PathRep dir) {
   Directory.load(dir)
       .then((dir) {
-        if (dir) dir.remove();
+        if (dir != null) dir.remove();
       }).then((_) => Directory.create(dir));
 }
 
