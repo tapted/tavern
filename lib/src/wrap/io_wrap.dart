@@ -75,7 +75,7 @@ abstract class FileSystemEntity {
   /// exists there.
   static Future<FileSystemEntity> load(PathRep path) {
     return File.load(path).then((file) =>
-      file ? new Future.value(file) : Directory.load(path));
+        file != null ? new Future.value(file) : Directory.load(path));
   }
 
   Future copyTo(PathRep dir, {String name}) {
@@ -210,23 +210,22 @@ class Directory extends FileSystemEntity {
     List<int> tarData = (new GZipDecoder()).decodeBytes(gzData);
     Archive archive = (new TarDecoder()).decodeBytes(tarData);
 
-    return Future.forEach(archive.files, (zipFile) {
-      var zipFilename = zipFile.filename;
+    return Future.forEach(archive.files, (ArchiveFile zipFile) {
+      var zipFilename = zipFile.name;
       // If the zip file has all its contents inside a top directory then
       // sometimes we want to extract them up a level.
       if (skipTopDir) {
         var parts = zipFilename.split('/');
 
         // Skip files in the top directory
-        if (parts.length == 1)
-          return;
+        if (parts.length == 1) return null;
 
         parts.removeAt(0);
         zipFilename = parts.join('/');
       }
       var path = getPath().join(zipFilename);
 
-      if (zipFile.fileSize > 0)
+      if (zipFile.size > 0)
         return File.create(path).then((file) => file.write(zipFile.content));
       else
         return Directory.create(path);

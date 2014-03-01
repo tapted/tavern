@@ -1,7 +1,7 @@
 name: tavern
 
 dependencies:
-  archive: any
+  archive: '>=1.0.15'
   collection_helpers: any
   chrome: any
   path: any
