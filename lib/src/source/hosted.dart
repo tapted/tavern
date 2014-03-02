@@ -31,7 +31,7 @@ class HostedSource extends Source {
     var url = Platform.environment["PUB_HOSTED_URL"];
     if (url != null) return url;
 
-    return "http://tapted-z620-l.syd.corp.google.com:8080";
+    return "https://pub.dartlang.org";
   }
 
   /// Downloads a list of all versions of a package that are available from the
