@@ -12,6 +12,8 @@ fi
 echo 'Note that this does not `git pull` in bleeding_edge or check that it is currently on master.'
 
 (cd ../bleeding_edge && git archive HEAD:dart/sdk/lib/_internal/pub) | tar x
+# Don't touch the readme
+git checkout README.md
 git add --all
 git diff --stat
 echo 'Now `git commit`'
