@@ -7,6 +7,7 @@ library pub.source;
 import 'dart:async';
 
 import 'package:path/path.dart' as path;
+import 'package:stack_trace/stack_trace.dart';
 
 import 'io.dart';
 import 'package.dart';
@@ -143,15 +144,31 @@ abstract class Source {
   ///
   /// This doesn't need to be implemented if [downloadToSystemCache] is
   /// implemented.
-  Future<bool> get(PackageId id, String path) {
+  Future<bool> get(PackageId id, PathRep path) {
     throw new UnimplementedError("Either get() or downloadToSystemCache() must "
         "be implemented for source $name.");
   }
 
-  /// Downloads the package identified by [id] to the system cache. This is only
-  /// called for sources with [shouldCache] set to true.
+  /// Determines if the package with [id] is already downloaded to the system
+  /// cache.
   ///
-  /// By default, this uses [systemCacheDirectory] and [get].
+  /// This should only be called for sources with [shouldCache] set to true.
+  /// Completes to true if the package is in the cache and appears to be
+  /// uncorrupted.
+  Future<bool> isInSystemCache(PackageId id) {
+    return systemCacheDirectory(id).then((packageDir) {
+      return dirExists(packageDir).then((exists) {
+        if (!exists)
+          return false;
+        return _isCachedPackageCorrupted(packageDir).then((bad) => !bad);
+      });
+    });
+  }
+
+  /// Downloads the package identified by [id] to the system cache.
+  ///
+  /// This is only called for sources with [shouldCache] set to true. By
+  /// default, this uses [systemCacheDirectory] and [get].
   Future<Package> downloadToSystemCache(PackageId id) {
     var packageDir;
     return systemCacheDirectory(id).then((p) {
@@ -218,7 +235,8 @@ abstract class Source {
   /// This doesn't need to be implemented if [shouldCache] is false.
   Future<PathRep> systemCacheDirectory(PackageId id) {
     return new Future.error(
-        "systemCacheDirectory() must be implemented if shouldCache is true.");
+        "systemCacheDirectory() must be implemented if shouldCache is true.",
+        new Chain.current());
   }
 
   /// When a [Pubspec] or [LockFile] is parsed, it reads in the description for
@@ -289,10 +307,12 @@ abstract class Source {
   Future<PackageId> resolveId(PackageId id) => new Future.value(id);
 
   /// Returns the [Package]s that have been downloaded to the system cache.
-  List<Package> getCachedPackages() {
+  Future<List<Package>> getCachedPackages() {
     if (shouldCache) {
       throw new UnimplementedError("Source $name must implement this.");
     }
+    throw new UnsupportedError("Cannot call getCachedPackages() on an "
+        "uncached source.");
   }
 
   /// Returns the source's name.

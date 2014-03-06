@@ -1,5 +1,5 @@
 name: tavern
-
+version: "0.0.2"
 dependencies:
   archive: '>=1.0.15'
   collection_helpers: any

@@ -7,8 +7,6 @@ library pub.dart;
 
 import 'dart:async';
 import 'dart:isolate';
-
-import 'io.dart';
 import 'sdk.dart' as sdk;
 import 'utils.dart';
 import 'wrap/compiler_wrap.dart';
@@ -44,24 +42,46 @@ abstract class CompilerProvider {
 /// By default, the package root is assumed to be adjacent to [entrypoint], but
 /// if [packageRoot] is passed that will be used instead.
 Future compile(String entrypoint, CompilerProvider provider, {
-    String packageRoot, bool toDart: false, bool minify: true}) {
-  return new Future.sync(() {
+    Iterable<String> commandLineOptions,
+    bool checked: false,
+    bool minify: true,
+    bool verbose: false,
+    Map<String, String> environment,
+    String packageRoot,
+    bool analyzeAll: false,
+    bool suppressWarnings: false,
+    bool suppressHints: false,
+    bool suppressPackageWarnings: true,
+    bool terse: false,
+    bool toDart: false}) {
+  return syncFuture(() {
     var options = <String>['--categories=Client,Server'];
-    if (toDart) options.add('--output-type=dart');
+    if (checked) options.add('--checked');
     if (minify) options.add('--minify');
+    if (verbose) options.add('--verbose');
+    if (analyzeAll) options.add('--analyze-all');
+    if (suppressWarnings) options.add('--suppress-warnings');
+    if (suppressHints) options.add('--suppress-hints');
+    if (!suppressPackageWarnings) options.add('--show-package-warnings');
+    if (terse) options.add('--terse');
+    if (toDart) options.add('--output-type=dart');
+
+    if (environment == null) environment = {};
+    if (commandLineOptions != null) options.addAll(commandLineOptions);
 
     if (packageRoot == null) {
       packageRoot = path.join(path.dirname(entrypoint), 'packages');
     }
 
-    return compiler.compile(
+    return Chain.track(compiler.compile(
         path.toUri(entrypoint),
         path.toUri(appendSlash(_libPath)),
         path.toUri(appendSlash(packageRoot)),
         provider.provideInput,
         provider.handleDiagnostic,
         options,
-        provider.provideOutput);
+        provider.provideOutput,
+        environment));
   });
 }
 
@@ -76,11 +96,14 @@ String get _libPath {
 
 /// Returns whether [dart] looks like an entrypoint file.
 bool isEntrypoint(CompilationUnit dart) {
+  // Allow two or fewer arguments so that entrypoints intended for use with
+  // [spawnUri] get counted.
+  //
   // TODO(nweiz): this misses the case where a Dart file doesn't contain main(),
   // but it parts in another file that does.
   return dart.declarations.any((node) {
     return node is FunctionDeclaration && node.name.name == "main" &&
-        node.functionExpression.parameters.parameters.isEmpty;
+        node.functionExpression.parameters.parameters.length <= 2;
   });
 }
 
@@ -98,15 +121,16 @@ Future runInIsolate(String code, message) {
     var dartPath = path.join(dir, 'runInIsolate.dart');
     writeTextFile(dartPath, code, dontLogContents: true);
     var port = new ReceivePort();
-    return Isolate.spawn(_isolateBuffer, {
+    return Chain.track(Isolate.spawn(_isolateBuffer, {
       'replyTo': port.sendPort,
       'uri': path.toUri(dartPath).toString(),
       'message': message
-    }).then((_) => port.first).then((response) {
+    })).then((_) => port.first).then((response) {
       if (response['type'] == 'success') return null;
       assert(response['type'] == 'error');
       return new Future.error(
-          new CrossIsolateException.deserialize(response['error']));
+          new CrossIsolateException.deserialize(response['error']),
+          new Chain.current());
     });
   });
 }
@@ -119,7 +143,8 @@ Future runInIsolate(String code, message) {
 /// Adding an additional isolate in the middle works around this.
 void _isolateBuffer(message) {
   var replyTo = message['replyTo'];
-  Isolate.spawnUri(Uri.parse(message['uri']), [], message['message'])
+  Chain.track(Isolate.spawnUri(
+          Uri.parse(message['uri']), [], message['message']))
       .then((_) => replyTo.send({'type': 'success'}))
       .catchError((e, stack) {
     replyTo.send({

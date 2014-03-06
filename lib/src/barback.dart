@@ -8,23 +8,14 @@ import 'dart:async';
 
 import 'package:barback/barback.dart';
 import 'package:path/path.dart' as path;
-import 'package:stack_trace/stack_trace.dart';
 
-import 'barback/load_all_transformers.dart';
-import 'barback/pub_package_provider.dart';
-import 'barback/server.dart';
-import 'barback/sources.dart';
-import 'log.dart' as log;
-import 'package_graph.dart';
 import 'utils.dart';
 import 'version.dart';
 
-export 'barback/sources.dart' show WatcherType;
-
-/// The currently supported version of the Barback package that this version of
+/// The currently supported versions of the Barback package that this version of
 /// pub works with.
 ///
-/// Pub implicitly constrains barback to this version or later patch versions.
+/// Pub implicitly constrains barback to these versions.
 ///
 /// Barback is in a unique position. Pub imports it, so a copy of Barback is
 /// physically included in the SDK. Packages also depend on Barback (from
@@ -40,7 +31,10 @@ export 'barback/sources.dart' show WatcherType;
 ///
 /// Whenever a new non-patch version of barback is published, this *must* be
 /// incremented to synchronize with that.
-final supportedVersion = new Version(0, 11, 0);
+final supportedVersions = new VersionConstraint.parse(">=0.11.0 <0.13.0");
+
+/// A list of the names of all built-in transformers that pub exposes.
+const _BUILT_IN_TRANSFORMERS = const ['\$dart2js'];
 
 /// An identifier for a transformer and the configuration that will be passed to
 /// it.
@@ -63,8 +57,34 @@ class TransformerId {
 
   /// The configuration to pass to the transformer.
   ///
-  /// This will be null if no configuration was provided.
+  /// Any pub-specific configuration (i.e. keys starting with "$") will have
+  /// been stripped out of this and handled separately. This will be an empty
+  /// map if no configuration was provided.
   final Map configuration;
+
+  /// The primary input inclusions.
+  ///
+  /// Each inclusion is an asset path. If this set is non-empty, than *only*
+  /// matching assets are allowed as a primary input by this transformer. If
+  /// `null`, all assets are included.
+  ///
+  /// This is processed before [excludes]. If a transformer has both includes
+  /// and excludes, then the set of included assets is determined and assets
+  /// are excluded from that resulting set.
+  final Set<String> includes;
+
+  /// The primary input exclusions.
+  ///
+  /// Any asset whose pach is in this is not allowed as a primary input by
+  /// this transformer.
+  ///
+  /// This is processed after [includes]. If a transformer has both includes
+  /// and excludes, then the set of included assets is determined and assets
+  /// are excluded from that resulting set.
+  final Set<String> excludes;
+
+  /// Whether this ID points to a built-in transformer exposed by pub.
+  bool get isBuiltInTransformer => package.startsWith('\$');
 
   /// Parses a transformer identifier.
   ///
@@ -82,16 +102,66 @@ class TransformerId {
     if (parts.length == 1) {
       return new TransformerId(parts.single, null, configuration);
     }
+
     return new TransformerId(parts.first, parts.last, configuration);
   }
 
-  TransformerId(this.package, this.path, this.configuration) {
-    if (configuration == null) return;
-    for (var reserved in ['include', 'exclude']) {
-      if (!configuration.containsKey(reserved)) continue;
-      throw new FormatException('Transformer configuration may not include '
-          'reserved key "$reserved".');
+  factory TransformerId(String package, String path, Map configuration) {
+    parseField(key) {
+      if (!configuration.containsKey(key)) return null;
+      var field = configuration.remove(key);
+
+      if (field is String) return new Set<String>.from([field]);
+
+      if (field is List) {
+        var nonstrings = field
+            .where((element) => element is! String)
+            .map((element) => '"$element"');
+
+        if (nonstrings.isNotEmpty) {
+          throw new FormatException(
+              '"$key" list field may only contain strings, but contained '
+              '${toSentence(nonstrings)}.');
+        }
+
+        return new Set<String>.from(field);
+      } else {
+        throw new FormatException(
+            '"$key" field must be a string or list, but was "$field".');
+      }
     }
+
+    var includes = null;
+    var excludes = null;
+
+    if (configuration == null) {
+      configuration = {};
+    } else {
+      // Pull out the exclusions/inclusions.
+      includes = parseField("\$include");
+      excludes = parseField("\$exclude");
+
+      // All other keys starting with "$" are unexpected.
+      var reservedKeys = configuration.keys
+          .where((key) => key is String && key.startsWith(r'$'))
+          .map((key) => '"$key"');
+
+      if (reservedKeys.isNotEmpty) {
+        throw new FormatException(
+            'Unknown reserved ${pluralize('field', reservedKeys.length)} '
+            '${toSentence(reservedKeys)}.');
+      }
+    }
+
+    return new TransformerId._(package, path, configuration,
+        includes, excludes);
+  }
+
+  TransformerId._(this.package, this.path, this.configuration,
+      this.includes, this.excludes) {
+    if (!package.startsWith('\$')) return;
+    if (_BUILT_IN_TRANSFORMERS.contains(package)) return;
+    throw new FormatException('Unsupported built-in transformer $package.');
   }
 
   // TODO(nweiz): support deep equality on [configuration] as well.
@@ -119,72 +189,6 @@ class TransformerId {
   }
 }
 
-/// Creates a [BarbackServer] serving on [host] and [port].
-///
-/// This transforms and serves all library and asset files in all packages in
-/// [graph]. It loads any transformer plugins defined in packages in [graph] and
-/// re-runs them as necessary when any input files change.
-///
-/// If [builtInTransformers] is provided, then a phase is added to the end of
-/// each package's cascade including those transformers.
-///
-/// If [watchForUpdates] is true (the default), the server will continually
-/// monitor the app and its dependencies for any updates. Otherwise the state of
-/// the app when the server is started will be maintained.
-Future<BarbackServer> createServer(String host, int port, PackageGraph graph,
-    BarbackMode mode, {Iterable<Transformer> builtInTransformers,
-    WatcherType watcher: WatcherType.AUTO}) {
-  var provider = new PubPackageProvider(graph);
-  var barback = new Barback(provider);
-
-  barback.log.listen(_log);
-
-  return BarbackServer.bind(host, port, barback, graph.entrypoint.root.name)
-      .then((server) {
-    return new Future.sync(() {
-      if (watcher != WatcherType.NONE) {
-        return watchSources(graph, barback, watcher);
-      }
-
-      loadSources(graph, barback);
-    }).then((_) {
-      var completer = new Completer();
-
-      // If any errors get emitted either by barback or by the server, including
-      // non-programmatic barback errors, they should take down the whole
-      // program.
-      var subscriptions = [
-        server.barback.errors.listen((error) {
-          if (error is TransformerException) error = error.error;
-          if (!completer.isCompleted) {
-            completer.completeError(error, new Trace.current());
-          }
-        }),
-        server.barback.results.listen((_) {}, onError: (error, stackTrace) {
-          if (completer.isCompleted) return;
-          completer.completeError(error, stackTrace);
-        }),
-        server.results.listen((_) {}, onError: (error, stackTrace) {
-          if (completer.isCompleted) return;
-          completer.completeError(error, stackTrace);
-        })
-      ];
-
-      loadAllTransformers(server, graph, mode, builtInTransformers).then((_) {
-        if (!completer.isCompleted) completer.complete(server);
-      }).catchError((error, stackTrace) {
-        if (!completer.isCompleted) completer.completeError(error, stackTrace);
-      });
-
-      return completer.future.whenComplete(() {
-        for (var subscription in subscriptions) {
-          subscription.cancel();
-        }
-      });
-    });
-  });
-}
-
 /// Converts [id] to a "package:" URI.
 ///
 /// This will throw an [ArgumentError] if [id] doesn't represent a library in
@@ -197,139 +201,53 @@ Uri idToPackageUri(AssetId id) {
   return new Uri(scheme: 'package', path: id.path.replaceFirst('lib/', ''));
 }
 
-/// Converts [uri] into an [AssetId] if it has a path containing "packages" or
+/// Converts [uri] into an [AssetId] if its path is within "packages" or
 /// "assets".
 ///
-/// If the URI doesn't contain one of those special directories, returns null.
-/// If it does contain a special directory, but lacks a following package name,
+/// While "packages" can appear anywhere in the path, "assets" is only allowed
+/// as the top-level directory. (This throws a [FormatException] if "assets"
+/// appears anywhere else.)
+///
+/// If the URL contains a special directory, but lacks a following package name,
 /// throws a [FormatException].
+///
+/// If the URI doesn't contain one of those special directories, returns null.
 AssetId specialUrlToId(Uri url) {
   var parts = path.url.split(url.path);
 
-  for (var pair in [["packages", "lib"], ["assets", "asset"]]) {
-    var partName = pair.first;
-    var dirName = pair.last;
+  // Strip the leading "/" from the URL.
+  if (parts.isNotEmpty && parts.first == "/") parts = parts.skip(1).toList();
 
-    // Find the package name and the relative path in the package.
-    var index = parts.indexOf(partName);
-    if (index == -1) continue;
+  if (parts.isEmpty) return null;
 
-    // If we got here, the path *did* contain the special directory, which
-    // means we should not interpret it as a regular path. If it's missing the
-    // package name after the special directory, it's invalid.
-    if (index + 1 >= parts.length) {
+  // Check for "assets" at the beginning of the URL.
+  if (parts.first == "assets") {
+    if (parts.length <= 1) {
       throw new FormatException(
-          'Invalid package path "${path.url.joinAll(parts)}". '
-          'Expected package name after "$partName".');
+          'Invalid URL path "${url.path}". Expected package name after '
+          '"assets".');
     }
 
-    var package = parts[index + 1];
-    var assetPath = path.url.join(dirName,
-        path.url.joinAll(parts.skip(index + 2)));
+    var package = parts[1];
+    var assetPath = path.url.join("asset", path.url.joinAll(parts.skip(2)));
     return new AssetId(package, assetPath);
   }
 
-  return null;
-}
+  // Check for "packages" anywhere in the URL.
+  // TODO(rnystrom): If we rewrite "package:" imports to relative imports that
+  // point to a canonical "packages" directory, we can limit "packages" to the
+  // root of the URL as well. See: #16649.
+  var index = parts.indexOf("packages");
+  if (index == -1) return null;
 
-/// Converts [id] to a "servable path" for that asset.
-///
-/// This is the root relative URL that could be used to request that asset from
-/// pub serve. It's also the relative path that the asset will be output to by
-/// pub build (except this always returns a path using URL separators).
-///
-/// [entrypoint] is the name of the entrypoint package.
-///
-/// Examples (where [entrypoint] is "myapp"):
-///
-///     myapp|web/index.html   -> /index.html
-///     myapp|lib/lib.dart     -> /packages/myapp/lib.dart
-///     foo|lib/foo.dart       -> /packages/foo/foo.dart
-///     foo|asset/foo.png      -> /assets/foo/foo.png
-///     myapp|test/main.dart   -> ERROR
-///     foo|web/
-///
-/// Throws a [FormatException] if [id] is not a valid public asset.
-String idtoUrlPath(String entrypoint, AssetId id) {
-  var parts = path.url.split(id.path);
-
-  if (parts.length < 2) {
+  // There should be a package name after "packages".
+  if (parts.length <= index + 1) {
     throw new FormatException(
-        "Can not serve assets from top-level directory.");
+        'Invalid URL path "${url.path}". Expected package name '
+        'after "packages".');
   }
 
-  // Each top-level directory gets handled differently.
-  var dir = parts[0];
-  parts = parts.skip(1);
-
-  switch (dir) {
-    case "asset":
-      return path.url.join("/", "assets", id.package, path.url.joinAll(parts));
-
-    case "lib":
-      return path.url.join("/", "packages", id.package, path.url.joinAll(parts));
-
-    case "web":
-      if (id.package != entrypoint) {
-        throw new FormatException(
-            'Cannot access "web" directory of non-root packages.');
-      }
-      return path.url.join("/", path.url.joinAll(parts));
-
-    default:
-      throw new FormatException('Cannot access assets from "$dir".');
-  }
-}
-
-/// Log [entry] using Pub's logging infrastructure.
-///
-/// Since both [LogEntry] objects and the message itself often redundantly
-/// show the same context like the file where an error occurred, this tries
-/// to avoid showing redundant data in the entry.
-void _log(LogEntry entry) {
-  messageMentions(String text) {
-    return entry.message.toLowerCase().contains(text.toLowerCase());
-  }
-
-  var prefixParts = [];
-
-  // Show the level (unless the message mentions it).
-  if (!messageMentions(entry.level.name)) {
-    prefixParts.add("${entry.level} in");
-  }
-
-  // Show the transformer.
-  prefixParts.add(entry.transform.transformer);
-
-  // Mention the primary input of the transform unless the message seems to.
-  if (!messageMentions(entry.transform.primaryId.path)) {
-    prefixParts.add("on ${entry.transform.primaryId}");
-  }
-
-  // If the relevant asset isn't the primary input, mention it unless the
-  // message already does.
-  if (entry.assetId != entry.transform.primaryId &&
-      !messageMentions(entry.assetId.path)) {
-    prefixParts.add("with input ${entry.assetId}");
-  }
-
-  var prefix = "[${prefixParts.join(' ')}]:";
-  var message = entry.message;
-  if (entry.span != null) {
-    message = entry.span.getLocationMessage(entry.message);
-  }
-
-  switch (entry.level) {
-    case LogLevel.ERROR:
-      log.error("${log.red(prefix)}\n$message");
-      break;
-
-    case LogLevel.WARNING:
-      log.warning("${log.yellow(prefix)}\n$message");
-      break;
-
-    case LogLevel.INFO:
-      log.message("$prefix\n$message");
-      break;
-  }
+  var package = parts[index + 1];
+  var assetPath = path.url.join("lib", path.url.joinAll(parts.skip(index + 2)));
+  return new AssetId(package, assetPath);
 }

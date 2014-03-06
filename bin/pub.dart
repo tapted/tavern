@@ -4,25 +4,25 @@
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:args/args.dart';
 import 'package:path/path.dart' as path;
+import 'package:stack_trace/stack_trace.dart';
 
 import '../lib/src/command.dart';
 import '../lib/src/exit_codes.dart' as exit_codes;
+import '../lib/src/http.dart';
 import '../lib/src/io.dart';
 import '../lib/src/log.dart' as log;
 import '../lib/src/sdk.dart' as sdk;
 import '../lib/src/utils.dart';
 
-final pubArgParser = initArgParser();
-
 void main(List<String> arguments) {
   ArgResults options;
 
   try {
-    options = pubArgParser.parse(arguments);
+    options = PubCommand.pubArgParser.parse(arguments,
+        allowTrailingOptions: true);
   } on FormatException catch (e) {
     log.error(e.message);
     log.error('Run "pub help" to see available options.');
@@ -36,19 +36,7 @@ void main(List<String> arguments) {
   }
 
   if (options['help']) {
-    printUsage();
-    return;
-  }
-
-  if (options.command == null) {
-    if (options.rest.isEmpty) {
-      // No command was chosen.
-      printUsage();
-    } else {
-      log.error('Could not find a command named "${options.rest[0]}".');
-      log.error('Run "pub help" to see available commands.');
-      flushThenExit(exit_codes.USAGE);
-    }
+    PubCommand.printGlobalUsage();
     return;
   }
 
@@ -83,45 +71,132 @@ void main(List<String> arguments) {
     cacheDir = '${Platform.environment['HOME']}/.pub-cache';
   }
 
-  validatePlatform().then((_) {
-    PubCommand.commands[options.command.name].run(cacheDir, options, arguments);
+  validatePlatform().then((_) => runPub(cacheDir, options, arguments));
+}
+
+/// Runs the appropriate pub command whose [arguments] have been parsed to
+/// [options] using the system cache in [cacheDir].
+///
+/// Handles and correctly reports any errors that occur while running.
+void runPub(String cacheDir, ArgResults options, List<String> arguments) {
+  var captureStackChains =
+      options['trace'] ||
+      options['verbose'] ||
+      options['verbosity'] == 'all';
+
+  captureErrors(() => invokeCommand(cacheDir, options),
+      captureStackChains: captureStackChains).catchError((error, Chain chain) {
+    // This is basically the top-level exception handler so that we don't
+    // spew a stack trace on our users.
+    var message;
+
+    log.error(getErrorMessage(error));
+    log.fine("Exception type: ${error.runtimeType}");
+
+    if (options['trace'] || !isUserFacingException(error)) {
+      log.error(chain.terse);
+    } else {
+      log.fine(chain.terse);
+    }
+
+    if (error is ApplicationException && error.innerError != null) {
+      var message = "Wrapped exception: ${error.innerError}";
+      if (error.innerTrace != null) message = "$message\n${error.innerTrace}";
+      log.fine(message);
+    }
+
+    if (options['trace']) {
+      log.dumpTranscript();
+    } else if (!isUserFacingException(error)) {
+      log.error("""
+This is an unexpected error. Please run
+
+    pub --trace ${arguments.map((arg) => "'$arg'").join(' ')}
+
+and include the results in a bug report on http://dartbug.com/new.
+""");
+    }
+
+    return flushThenExit(chooseExitCode(error));
+  }).then((_) {
+    // Explicitly exit on success to ensure that any dangling dart:io handles
+    // don't cause the process to never terminate.
+    return flushThenExit(exit_codes.SUCCESS);
   });
 }
 
-ArgParser initArgParser() {
-  var argParser = new ArgParser();
+/// Returns the appropriate exit code for [exception], falling back on 1 if no
+/// appropriate exit code could be found.
+int chooseExitCode(exception) {
+  if (exception is HttpException || exception is HttpException ||
+      exception is SocketException || exception is PubHttpException) {
+    return exit_codes.UNAVAILABLE;
+  } else if (exception is FormatException) {
+    return exit_codes.DATA;
+  } else if (exception is UsageException) {
+    return exit_codes.USAGE;
+  } else {
+    return 1;
+  }
+}
 
-  // Add the global options.
-  argParser.addFlag('help', abbr: 'h', negatable: false,
-      help: 'Print this usage information.');
-  argParser.addFlag('version', negatable: false,
-      help: 'Print pub version.');
-  argParser.addFlag('trace',
-       help: 'Print debugging information when an error occurs.');
-  argParser.addOption('verbosity',
-      help: 'Control output verbosity.',
-      allowed: ['normal', 'io', 'solver', 'all'],
-      allowedHelp: {
-        'normal': 'Show errors, warnings, and user messages.',
-        'io':     'Also show IO operations.',
-        'solver': 'Show steps during version resolution.',
-        'all':    'Show all output including internal tracing messages.'
-      });
-  argParser.addFlag('verbose', abbr: 'v', negatable: false,
-      help: 'Shortcut for "--verbosity=all".');
+/// Walks the command tree and runs the selected pub command.
+Future invokeCommand(String cacheDir, ArgResults mainOptions) {
+  var commands = PubCommand.mainCommands;
+  var command;
+  var commandString = "pub";
+  var options = mainOptions;
 
-  // Register the commands.
-  PubCommand.commands.forEach((name, command) {
-    argParser.addCommand(name, command.commandParser);
+  while (commands.isNotEmpty) {
+    if (options.command == null) {
+      if (options.rest.isEmpty) {
+        if (command == null) {
+          // No top-level command was chosen.
+          PubCommand.printGlobalUsage();
+          return new Future.value();
+        }
+
+        command.usageError('Missing subcommand for "$commandString".');
+      } else {
+        if (command == null) {
+          PubCommand.usageErrorWithCommands(commands,
+              'Could not find a command named "${options.rest[0]}".');
+        }
+
+        command.usageError('Could not find a subcommand named '
+            '"${options.rest[0]}" for "$commandString".');
+      }
+    }
+
+    // Step into the command.
+    options = options.command;
+    command = commands[options.name];
+    commands = command.subcommands;
+    commandString += " ${options.name}";
+
+    if (options['help']) {
+      command.printUsage();
+      return new Future.value();
+    }
+  }
+
+  // Make sure there aren't unexpected arguments.
+  if (!command.takesArguments && options.rest.isNotEmpty) {
+    command.usageError(
+        'Command "${options.name}" does not take any arguments.');
+  }
+
+  return syncFuture(() {
+    return command.run(cacheDir, options);
+  }).whenComplete(() {
+    command.cache.deleteTempDir();
   });
-
-  return argParser;
 }
 
 /// Checks that pub is running on a supported platform. If it isn't, it prints
 /// an error message and exits. Completes when the validation is done.
 Future validatePlatform() {
-  return new Future.sync(() {
+  return syncFuture(() {
     if (Platform.operatingSystem != 'windows') return null;
 
     return runProcess('ver', []).then((result) {
@@ -131,44 +206,4 @@ Future validatePlatform() {
       }
     });
   });
-}
-
-/// Displays usage information for the app.
-void printUsage([String description = 'Pub is a package manager for Dart.']) {
-  // Build up a buffer so it shows up as a single log entry.
-  var buffer = new StringBuffer();
-  buffer.write(description);
-  buffer.write('\n\n');
-  buffer.write('Usage: pub command [arguments]\n\n');
-  buffer.write('Global options:\n');
-  buffer.write('${pubArgParser.getUsage()}\n\n');
-
-  // Show the commands sorted.
-  buffer.write('Available commands:\n');
-
-  // TODO(rnystrom): A sorted map would be nice.
-  int length = 0;
-  var names = <String>[];
-  for (var command in PubCommand.commands.keys) {
-    // Hide aliases.
-    if (PubCommand.commands[command].aliases.indexOf(command) >= 0) continue;
-
-    // Hide undocumented commands.
-    if (PubCommand.commands[command].hidden) continue;
-
-    length = math.max(length, command.length);
-    names.add(command);
-  }
-
-  names.sort((a, b) => a.compareTo(b));
-
-  for (var name in names) {
-    buffer.write('  ${padRight(name, length)}   '
-        '${PubCommand.commands[name].description}\n');
-  }
-
-  buffer.write('\n');
-  buffer.write(
-      'Use "pub help [command]" for more information about a command.');
-  log.message(buffer.toString());
 }

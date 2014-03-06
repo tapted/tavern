@@ -15,26 +15,27 @@ main() {
       d.appPubspec(),
       d.dir('web', [
         d.file('file1.dart', 'var main = () => print("hello");'),
-        d.file('file2.dart', 'void main(arg) => print("hello");'),
+        d.file('file2.dart', 'void main(arg1, arg2, arg3) => print("hello");'),
         d.file('file3.dart', 'class Foo { void main() => print("hello"); }'),
         d.file('file4.dart', 'var foo;')
       ])
     ]).create();
 
     schedulePub(args: ["build", "--mode", "debug"],
-        output: new RegExp(r"Built 4 files!"),
-        exitCode: 0);
+        output: new RegExp(r"Built 4 files!"));
 
     d.dir(appPath, [
       d.dir('build', [
-        d.nothing('file1.dart.js'),
-        d.matcherFile('file1.dart', isNot(isEmpty)),
-        d.nothing('file2.dart.js'),
-        d.matcherFile('file2.dart', isNot(isEmpty)),
-        d.nothing('file3.dart.js'),
-        d.matcherFile('file3.dart', isNot(isEmpty)),
-        d.nothing('file4.dart.js'),
-        d.matcherFile('file4.dart', isNot(isEmpty))
+        d.dir('web', [
+          d.nothing('file1.dart.js'),
+          d.matcherFile('file1.dart', isNot(isEmpty)),
+          d.nothing('file2.dart.js'),
+          d.matcherFile('file2.dart', isNot(isEmpty)),
+          d.nothing('file3.dart.js'),
+          d.matcherFile('file3.dart', isNot(isEmpty)),
+          d.nothing('file4.dart.js'),
+          d.matcherFile('file4.dart', isNot(isEmpty))
+        ])
       ])
     ]).validate();
   });

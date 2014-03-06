@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Tavern",
   "short_name": "Tavern",
-  "version": "0.3",
+  "version": "0.4",
   "minimum_chrome_version": "23",
   "icons": {"128": "images/tavern_icon.png"},
   "app": {
@@ -13,7 +13,7 @@
   "permissions": [
     {"fileSystem": ["write", "retainEntries", "directory"]},
     "storage",
-    "http://pub.dartlang.org/",
+    "https://pub.dartlang.org/",
     "https://commondatastorage.googleapis.com/pub.dartlang.org/",
     "https://api.github.com/",
     "https://codeload.github.com/"

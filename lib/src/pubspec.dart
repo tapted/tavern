@@ -11,7 +11,6 @@ import 'package:path/path.dart' as path;
 import 'io.dart';
 import 'package.dart';
 import 'path_rep.dart';
-import 'source.dart';
 import 'source_registry.dart';
 import 'utils.dart';
 import 'version.dart';
@@ -164,30 +163,25 @@ class Pubspec {
             _error('"$field.$library" field must be a map, but was '
                 '"$configuration".');
           }
-
-          var reservedKeys = configuration.keys
-              .where((key) => key is String && key.startsWith(r'$'))
-              .map((key) => '"$key"');
-          if (reservedKeys.isNotEmpty) {
-            _error('"$field.$library" field cannot contain reserved '
-                '${pluralize('field', reservedKeys.length)} '
-                '${toSentence(reservedKeys)}.');
-          }
         }
 
-        var id = _wrapFormatException("transformer identifier",
+        var id = _wrapFormatException("transformer configuration",
             "$field.$library",
             () => new TransformerId.parse(library, configuration));
 
         if (id.package != name &&
-            !dependencies.any((ref) => ref.name == id.package)) {
-          _error('"$field.$library" refers to a package that\'s not listed in '
-              '"dependencies".');
+            !id.isBuiltInTransformer &&
+            !dependencies.any((ref) => ref.name == id.package) &&
+            !devDependencies.any((ref) => ref.name == id.package) &&
+            !dependencyOverrides.any((ref) => ref.name == id.package)) {
+          _error('"$field.$library" refers to a package that\'s not a '
+              'dependency.');
         }
 
         return id;
       }).toSet();
     }).toList();
+
     return _transformers;
   }
   List<Set<TransformerId>> _transformers;

@@ -2,9 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:scheduled_test/scheduled_test.dart';
 import 'package:scheduled_test/scheduled_server.dart';
+import 'package:scheduled_test/scheduled_stream.dart';
+import 'package:scheduled_test/scheduled_test.dart';
 
+import '../../lib/src/exit_codes.dart' as exit_codes;
 import '../descriptor.dart' as d;
 import '../test_pub.dart';
 
@@ -21,8 +23,7 @@ main() {
     var pub = startPublish(server);
 
     pub.writeLine("n");
-    pub.shouldExit(0);
-    expect(pub.remainingStderr(),
-        completion(contains("Package upload canceled.")));
+    pub.shouldExit(exit_codes.SUCCESS);
+    pub.stderr.expect(consumeThrough("Package upload canceled."));
   });
 }

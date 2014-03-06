@@ -18,6 +18,7 @@ import '../source.dart';
 import '../utils.dart';
 import '../version.dart';
 import '../wrap/http_wrap.dart';
+import '../wrap/io_wrap.dart';
 
 /// A package source that gets packages from a package hosting site that uses
 /// the same API as pub.dartlang.org.
@@ -156,16 +157,17 @@ class HostedSource extends Source {
       String url) {
     if (error is PubHttpException &&
         error.response.statusCode == 404) {
-      fail('Could not find package "$package" at $url.', error, stackTrace);
+      throw new PackageNotFoundException(
+          "Could not find package $package at $url.", error, stackTrace);
     }
 
     if (error is TimeoutException) {
-      fail('Timed out trying to find package "$package" at $url.',
+      fail("Timed out trying to find package $package at $url.",
           error, stackTrace);
     }
 
     if (error is SocketException) {
-      fail('Got socket error trying to find package "$package" at $url.',
+      fail("Got socket error trying to find package $package at $url.",
            error, stackTrace);
     }
 
@@ -191,7 +193,7 @@ class OfflineHostedSource extends HostedSource {
           .toList();
     }).then((versions) {
       // If there are no versions in the cache, report a clearer error.
-      if (versions.isEmpty) fail('Could not find package "$name" in cache.');
+      if (versions.isEmpty) fail("Could not find package $name in cache.");
 
       return versions;
     });

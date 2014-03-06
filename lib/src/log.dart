@@ -8,6 +8,8 @@ library pub.log;
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:path/path.dart' as p;
+
 import 'io.dart';
 import 'transcript.dart';
 import 'utils.dart';
@@ -42,6 +44,7 @@ final _green = getSpecial('\u001b[32m');
 final _magenta = getSpecial('\u001b[35m');
 final _red = getSpecial('\u001b[31m');
 final _yellow = getSpecial('\u001b[33m');
+final _gray = getSpecial('\u001b[1;30m');
 final _none = getSpecial('\u001b[0m');
 final _bold = getSpecial('\u001b[1m');
 
@@ -120,6 +123,13 @@ void write(Level level, message) {
   if (_loggers.isEmpty) showNormal();
 
   var lines = splitLines(message.toString());
+
+  // Discard a trailing newline. This is useful since StringBuffers often end
+  // up with an extra newline at the end from using [writeln].
+  if (lines.isNotEmpty && lines.last == "") {
+    lines.removeLast();
+  }
+
   var entry = new Entry(level, lines);
 
   var logFn = _loggers[level];
@@ -166,30 +176,32 @@ Future ioAsync(String startMessage, Future operation,
 
 /// Logs the spawning of an [executable] process with [arguments] at [IO]
 /// level.
-void process(String executable, List<String> arguments) {
-  io("Spawning $executable ${arguments.join(' ')}");
+void process(String executable, List<String> arguments,
+    String workingDirectory) {
+  io("Spawning \"$executable ${arguments.join(' ')}\" in "
+      "${p.absolute(workingDirectory)}");
 }
 
 /// Logs the results of running [executable].
 void processResult(String executable, PubProcessResult result) {
   // Log it all as one message so that it shows up as a single unit in the logs.
   var buffer = new StringBuffer();
-  buffer.write("Finished $executable. Exit code ${result.exitCode}.");
+  buffer.writeln("Finished $executable. Exit code ${result.exitCode}.");
 
   dumpOutput(String name, List<String> output) {
     if (output.length == 0) {
-      buffer.write("Nothing output on $name.");
+      buffer.writeln("Nothing output on $name.");
     } else {
-      buffer.write("$name:");
+      buffer.writeln("$name:");
       var numLines = 0;
       for (var line in output) {
         if (++numLines > 1000) {
-          buffer.write('[${output.length - 1000}] more lines of output '
+          buffer.writeln('[${output.length - 1000}] more lines of output '
               'truncated...]');
           break;
         }
 
-        buffer.write(line);
+        buffer.writeln("| $line");
       }
     }
   }
@@ -197,7 +209,7 @@ void processResult(String executable, PubProcessResult result) {
   dumpOutput("stdout", result.stdout);
   dumpOutput("stderr", result.stderr);
 
-  io(buffer.toString());
+  io(buffer.toString().trim());
 }
 
 /// Enables recording of log entries.
@@ -239,6 +251,12 @@ Future progress(String message, Future callback()) {
 ///
 /// Use this to highlight the most important piece of a long chunk of text.
 String bold(text) => "$_bold$text$_none";
+
+/// Wraps [text] in the ANSI escape codes to make it gray when on a platform
+/// that supports that.
+///
+/// Use this for text that's less important than the text around it.
+String gray(text) => "$_gray$text$_none";
 
 /// Wraps [text] in the ANSI escape codes to color it cyan when on a platform
 /// that supports that.

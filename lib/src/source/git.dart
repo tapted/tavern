@@ -49,7 +49,7 @@ class GitSource extends Source {
         // Check the url points to github, otherwise give up.
         if (gitUri.host != "github.com") {
           throw new Exception(
-              "Cannot get '${id.name}' from Git (${_getUrl(id)}).\n"
+              "Cannot get ${id.name} from Git (${_getUrl(id)}).\n"
               "Please ensure Git is correctly installed.");
         }
 
@@ -67,12 +67,15 @@ class GitSource extends Source {
             .then((res) => res[0].extractArchive(res[1], skipTopDir: true))
             .then((_) => Package.load(id.name, path, systemCache.sources));
       }
-      ensureDir(path.join(systemCacheRoot, 'cache'));
-      return _ensureRepoCache(id)
+      return ensureDir(systemCacheRoot.join('cache'))
+          .then((_) => _ensureRepoCache(id))
           .then((_) => systemCacheDirectory(id)).then((path) {
             revisionCachePath = path;
-            if (entryExists(revisionCachePath)) return null;
-            return _clone(_repoCachePath(id),
+            return entryExists(revisionCachePath);
+          }).then((exists) {
+            if (!exists)
+              return null;
+            return _clone(_repoCachePath(id).toString(),
                 revisionCachePath, mirror: false);
           }).then((_) {
             var ref = _getEffectiveRef(id);
@@ -86,12 +89,12 @@ class GitSource extends Source {
   }
 
   /// Returns the path to the revision-specific cache of [id].
-  Future<String> systemCacheDirectory(PackageId id) {
+  Future<PathRep> systemCacheDirectory(PackageId id) {
     return new Future.value(systemCacheRoot.join('git', id.name));
   }
 
   /// Ensures [description] is a Git URL.
-  dynamic parseDescription(String containingPath, description,
+  dynamic parseDescription(PathRep containingPath, description,
                            {bool fromLockFile: false}) {
     // TODO(rnystrom): Handle git URLs that are relative file paths (#8570).
     // TODO(rnystrom): Now that this function can modify the description, it
@@ -146,17 +149,21 @@ class GitSource extends Source {
   /// future that completes once this is finished and throws an exception if it
   /// fails.
   Future _ensureRepoCache(PackageId id) {
-    return new Future.sync(() {
+    return syncFuture(() {
       var path = _repoCachePath(id);
-      if (!entryExists(path)) return _clone(_getUrl(id), path, mirror: true);
-      return git.run(["fetch"], workingDir: path).then((result) => null);
+      entryExists(path).then((exists) {
+        if (!exists)
+          return _clone(_getUrl(id), path, mirror: true);
+        return git.run(["fetch"], workingDir: path).then((result) => null);
+      });
     });
   }
 
   /// Returns a future that completes to the revision hash of [id].
   Future<String> _revisionAt(PackageId id) {
-    return git.run(["rev-parse", _getEffectiveRef(id)],
-        workingDir: _repoCachePath(id)).then((result) => result[0]);
+    return _ensureRepoCache(id).then((_) =>
+        git.run(["rev-parse", _getEffectiveRef(id)],
+            workingDir: _repoCachePath(id)).then((result) => result[0]));
   }
 
   /// Clones the repo at the URI [from] to the path [to] on the local
@@ -165,11 +172,12 @@ class GitSource extends Source {
   /// If [mirror] is true, create a bare, mirrored clone. This doesn't check out
   /// the working tree, but instead makes the repository a local mirror of the
   /// remote repository. See the manpage for `git clone` for more information.
-  Future _clone(String from, String to, {bool mirror: false}) {
-    return new Future.sync(() {
+  Future _clone(String from, PathRep to, {bool mirror: false}) {
+    return syncFuture(() {
       // Git on Windows does not seem to automatically create the destination
       // directory.
-      ensureDir(to);
+      return ensureDir(to);
+    }).then((_) {
       var args = ["clone", from, to];
       if (mirror) args.insert(1, "--mirror");
       return git.run(args);
@@ -184,9 +192,9 @@ class GitSource extends Source {
 
   /// Returns the path to the canonical clone of the repository referred to by
   /// [id] (the one in `<system cache>/git/cache`).
-  String _repoCachePath(PackageId id) {
+  PathRep _repoCachePath(PackageId id) {
     var repoCacheName = '${id.name}-${sha1(_getUrl(id))}';
-    return path.join(systemCacheRoot, 'cache', repoCacheName);
+    return systemCacheRoot.join('cache', repoCacheName);
   }
 
   /// Returns the repository URL for [id].

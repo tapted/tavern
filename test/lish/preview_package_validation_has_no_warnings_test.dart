@@ -4,7 +4,9 @@
 
 import 'package:scheduled_test/scheduled_test.dart';
 import 'package:scheduled_test/scheduled_server.dart';
+import 'package:scheduled_test/scheduled_stream.dart';
 
+import '../../lib/src/exit_codes.dart' as exit_codes;
 import '../descriptor.dart' as d;
 import '../test_pub.dart';
 
@@ -20,8 +22,7 @@ main() {
     var server = new ScheduledServer();
     var pub = startPublish(server, args: ['--dry-run']);
 
-    pub.shouldExit(0);
-    expect(pub.remainingStderr(),
-        completion(contains('Package has 0 warnings.')));
+    pub.shouldExit(exit_codes.SUCCESS);
+    pub.stderr.expect(consumeThrough('Package has 0 warnings.'));
   });
 }

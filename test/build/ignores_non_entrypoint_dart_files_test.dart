@@ -13,26 +13,18 @@ main() {
       d.appPubspec(),
       d.dir('web', [
         d.file('file1.dart', 'var main = () => print("hello");'),
-        d.file('file2.dart', 'void main(arg) => print("hello");'),
+        d.file('file2.dart', 'void main(arg1, arg2, arg3) => print("hello");'),
         d.file('file3.dart', 'class Foo { void main() => print("hello"); }'),
         d.file('file4.dart', 'var foo;')
       ])
     ]).create();
 
     schedulePub(args: ["build"],
-        output: new RegExp(r"Built 0 files!"),
-        exitCode: 0);
+        output: new RegExp(r"Built 0 files!"));
 
     d.dir(appPath, [
       d.dir('build', [
-        d.nothing('file1.dart.js'),
-        d.nothing('file1.dart'),
-        d.nothing('file2.dart.js'),
-        d.nothing('file2.dart'),
-        d.nothing('file3.dart.js'),
-        d.nothing('file3.dart'),
-        d.nothing('file4.dart.js'),
-        d.nothing('file4.dart')
+        d.nothing('web')
       ])
     ]).validate();
   });

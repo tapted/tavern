@@ -10,12 +10,10 @@ import 'package:http/http.dart' as http;
 
 import '../command.dart';
 import '../directory_tree.dart';
-import '../exit_codes.dart' as exit_codes;
 import '../http.dart';
 import '../io.dart';
 import '../log.dart' as log;
 import '../oauth2.dart' as oauth2;
-import '../sdk.dart' as sdk;
 import '../source/hosted.dart';
 import '../utils.dart';
 import '../validator.dart';
@@ -95,9 +93,7 @@ class LishCommand extends PubCommand {
 
   Future onRun() {
     if (force && dryRun) {
-      log.error('Cannot use both --force and --dry-run.');
-      this.printUsage();
-      return flushThenExit(exit_codes.USAGE);
+      usageError('Cannot use both --force and --dry-run.');
     }
 
     var packageBytesFuture = entrypoint.packageFiles().then((files) {
@@ -106,7 +102,7 @@ class LishCommand extends PubCommand {
       // Show the package contents so the user can verify they look OK.
       var package = entrypoint.root;
       log.message(
-          'Publishing "${package.name}" ${package.version} to $server:\n'
+          'Publishing ${package.name} ${package.version} to $server:\n'
           '${generateTree(files, baseDir: entrypoint.root.dir)}');
 
       return createTarGz(files, baseDir: entrypoint.root.dir);
@@ -145,15 +141,15 @@ class LishCommand extends PubCommand {
 
       if (dryRun) {
         var s = warnings.length == 1 ? '' : 's';
-        log.warning("Package has ${warnings.length} warning$s.");
+        log.warning("\nPackage has ${warnings.length} warning$s.");
         return false;
       }
 
-      var message = 'Looks great! Are you ready to upload your package';
+      var message = '\nLooks great! Are you ready to upload your package';
 
       if (!warnings.isEmpty) {
         var s = warnings.length == 1 ? '' : 's';
-        message = "Package has ${warnings.length} warning$s. Upload anyway";
+        message = "\nPackage has ${warnings.length} warning$s. Upload anyway";
       }
 
       return confirm(message).then((confirmed) {

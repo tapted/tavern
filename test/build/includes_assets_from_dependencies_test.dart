@@ -29,24 +29,47 @@ main() {
       d.appPubspec({
         "foo": {"path": "../foo"}
       }),
+      d.dir("example", [
+        d.file("index.html", "html"),
+      ]),
       d.dir("web", [
         d.file("index.html", "html"),
+        d.dir("sub", [
+          d.file("index.html", "html")
+        ])
       ])
     ]).create();
 
-    schedulePub(args: ["build"],
-        output: new RegExp(r"Built 3 files!"),
-        exitCode: 0);
+    schedulePub(args: ["build", "--all"],
+        output: new RegExp(r"Built 7 files!"));
 
     d.dir(appPath, [
       d.dir('build', [
-        d.file("index.html", "html"),
-        d.dir('assets', [
-          d.dir('foo', [
-            d.file('foo.txt', 'foo'),
-            d.dir('sub', [
-              d.file('bar.txt', 'bar'),
-            ]),
+        d.dir('example', [
+          d.file("index.html", "html"),
+          d.dir('assets', [
+            d.dir('foo', [
+              d.file('foo.txt', 'foo'),
+              d.dir('sub', [
+                d.file('bar.txt', 'bar'),
+              ]),
+            ])
+          ])
+        ]),
+        d.dir('web', [
+          d.file("index.html", "html"),
+          d.dir('assets', [
+            d.dir('foo', [
+              d.file('foo.txt', 'foo'),
+              d.dir('sub', [
+                d.file('bar.txt', 'bar'),
+              ]),
+            ])
+          ]),
+          d.dir("sub", [
+            d.file("index.html", "html"),
+            // "assets" should *only* be created in the top-level directory.
+            d.nothing("assets")
           ])
         ])
       ])

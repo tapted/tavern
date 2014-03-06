@@ -6,12 +6,13 @@ library pub_tests;
 
 import 'package:scheduled_test/scheduled_test.dart';
 
+import '../lib/src/exit_codes.dart' as exit_codes;
 import 'test_pub.dart';
 
 final USAGE_STRING = """
     Pub is a package manager for Dart.
 
-    Usage: pub command [arguments]
+    Usage: pub <command> [arguments]
 
     Global options:
     -h, --help            Print this usage information.
@@ -27,7 +28,8 @@ final USAGE_STRING = """
     -v, --verbose         Shortcut for "--verbosity=all".
 
     Available commands:
-      build      Copy and compile all Dart entrypoints in the 'web' directory.
+      build      Apply transformers to build a package.
+      cache      Work with the system cache.
       get        Get the current package's dependencies.
       help       Display help information for Pub.
       publish    Publish the current package to pub.dartlang.org.
@@ -80,6 +82,21 @@ main() {
     ''');
   });
 
+  integration('running pub with --help after a command with subcommands shows '
+              'command usage', () {
+    schedulePub(args: ['cache', '--help'],
+        output: '''
+          Work with the system cache.
+          
+          Usage: pub cache <subcommand>
+          -h, --help    Print usage information for this command.
+          
+          Available subcommands:
+            add   Install a package.
+     ''');
+  });
+
+
   integration('running pub with just --version displays version', () {
     schedulePub(args: ['--version'], output: VERSION_STRING);
   });
@@ -88,9 +105,33 @@ main() {
     schedulePub(args: ['quylthulg'],
         error: '''
         Could not find a command named "quylthulg".
-        Run "pub help" to see available commands.
+   
+        Available commands:
+          build      Apply transformers to build a package.
+          cache      Work with the system cache.
+          get        Get the current package's dependencies.
+          help       Display help information for Pub.
+          publish    Publish the current package to pub.dartlang.org.
+          serve      Run a local web development server.
+          upgrade    Upgrade the current package's dependencies to latest versions.
+          uploader   Manage uploaders for a package on pub.dartlang.org.
+          version    Print pub version.
         ''',
-        exitCode: 64);
+        exitCode: exit_codes.USAGE);
+  });
+
+  integration('an unknown subcommand displays an error message', () {
+    schedulePub(args: ['cache', 'quylthulg'],
+        error: '''
+        Could not find a subcommand named "quylthulg" for "pub cache".
+   
+        Usage: pub cache <subcommand>
+        -h, --help    Print usage information for this command.
+
+        Available subcommands:
+          add   Install a package.
+        ''',
+        exitCode: exit_codes.USAGE);
   });
 
   integration('an unknown option displays an error message', () {
@@ -99,7 +140,7 @@ main() {
         Could not find an option named "blorf".
         Run "pub help" to see available options.
         ''',
-        exitCode: 64);
+        exitCode: exit_codes.USAGE);
   });
 
   integration('an unknown command option displays an error message', () {
@@ -110,24 +151,39 @@ main() {
         Could not find an option named "blorf".
         Run "pub help" to see available options.
         ''',
-        exitCode: 64);
+        exitCode: exit_codes.USAGE);
   });
 
   integration('an unexpected argument displays an error message', () {
     schedulePub(args: ['version', 'unexpected'],
-        output: '''
-        Print pub version.
+        error: '''
+        Command "version" does not take any arguments.
 
         Usage: pub version
          -h, --help    Print usage information for this command.
         ''',
+        exitCode: exit_codes.USAGE);
+  });
+
+  integration('a missing subcommand displays an error message', () {
+    schedulePub(args: ['cache'],
         error: '''
-        Command "version" does not take any arguments.
+        Missing subcommand for "pub cache".
+
+        Usage: pub cache <subcommand>
+        -h, --help    Print usage information for this command.
+
+        Available subcommands:
+          add   Install a package.
         ''',
-        exitCode: 64);
+        exitCode: exit_codes.USAGE);
   });
 
   group('help', () {
+    integration('shows global help if no command is given', () {
+      schedulePub(args: ['help'], output: USAGE_STRING);
+    });
+
     integration('shows help for a command', () {
       schedulePub(args: ['help', 'get'],
           output: '''
@@ -153,15 +209,81 @@ main() {
             ''');
     });
 
+    integration('shows non-truncated help', () {
+      schedulePub(args: ['help', 'serve'],
+          output: '''
+            Run a local web development server.
+
+            By default, this serves "web/" and "test/", but an explicit list of 
+            directories to serve can be provided as well.
+
+            Usage: pub serve [directories...]
+            -h, --help               Print usage information for this command.
+                --port               The base port to listen on.
+                                     (defaults to "8080")
+
+                --[no-]dart2js       Compile Dart to JavaScript.
+                                     (defaults to on)
+
+                --[no-]force-poll    Force the use of a polling filesystem watcher.
+                --mode               Mode to run transformers in.
+                                     (defaults to "debug")
+            ''');
+    });
+
+    integration('shows help for a subcommand', () {
+      schedulePub(args: ['help', 'cache', 'list'],
+          output: '''
+            List packages in the system cache.
+
+            Usage: pub cache list
+            -h, --help    Print usage information for this command.
+            ''');
+    });
+
     integration('an unknown help command displays an error message', () {
       schedulePub(args: ['help', 'quylthulg'],
           error: '''
             Could not find a command named "quylthulg".
-            Run "pub help" to see available commands.
+
+            Available commands:
+              build      Apply transformers to build a package.
+              cache      Work with the system cache.
+              get        Get the current package's dependencies.
+              help       Display help information for Pub.
+              publish    Publish the current package to pub.dartlang.org.
+              serve      Run a local web development server.
+              upgrade    Upgrade the current package's dependencies to latest versions.
+              uploader   Manage uploaders for a package on pub.dartlang.org.
+              version    Print pub version.
             ''',
-            exitCode: 64);
+            exitCode: exit_codes.USAGE);
     });
 
+    integration('an unknown help subcommand displays an error message', () {
+      schedulePub(args: ['help', 'cache', 'quylthulg'],
+          error: '''
+            Could not find a subcommand named "quylthulg" for "pub cache".
+
+            Usage: pub cache <subcommand>
+            -h, --help    Print usage information for this command.
+    
+            Available subcommands:
+              add   Install a package.
+            ''',
+            exitCode: exit_codes.USAGE);
+    });
+
+    integration('an unexpected help subcommand displays an error message', () {
+      schedulePub(args: ['help', 'version', 'badsubcommand'],
+          error: '''
+            Command "pub version" does not expect a subcommand.
+
+            Usage: pub version
+            -h, --help    Print usage information for this command.
+            ''',
+            exitCode: exit_codes.USAGE);
+    });
   });
 
   group('version', () {

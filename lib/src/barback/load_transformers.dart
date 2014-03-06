@@ -12,12 +12,14 @@ import 'package:barback/barback.dart';
 // TODO(nweiz): don't import from "src" once issue 14966 is fixed.
 import 'package:barback/src/internal_asset.dart';
 import 'package:source_maps/source_maps.dart';
+import 'package:stack_trace/stack_trace.dart';
 
 import '../barback.dart';
 import '../dart.dart' as dart;
 import '../log.dart' as log;
 import '../utils.dart';
-import 'server.dart';
+import 'build_environment.dart';
+import 'excluding_transformer.dart';
 
 /// A Dart script to run in an isolate.
 ///
@@ -65,7 +67,7 @@ Iterable initialize(Uri uri, Map configuration, BarbackMode mode) {
     if (declaration is! ClassMirror) return null;
     var classMirror = declaration;
     if (classMirror.isPrivate) return null;
-    if (isAbstract(classMirror)) return null;
+    if (classMirror.isAbstract) return null;
     if (!classIsA(classMirror, transformerClass) &&
         !classIsA(classMirror, groupClass)) {
       return null;
@@ -74,14 +76,10 @@ Iterable initialize(Uri uri, Map configuration, BarbackMode mode) {
     var constructor = getConstructor(classMirror, 'asPlugin');
     if (constructor == null) return null;
     if (constructor.parameters.isEmpty) {
-      if (configuration != null) return null;
+      if (configuration.isNotEmpty) return null;
       return classMirror.newInstance(const Symbol('asPlugin'), []).reflectee;
     }
     if (constructor.parameters.length != 1) return null;
-
-    // If the constructor expects configuration and none was passed, it defaults
-    // to an empty map.
-    if (configuration == null) configuration = {};
 
     return classMirror.newInstance(const Symbol('asPlugin'),
         [new BarbackSettings(configuration, mode)]).reflectee;
@@ -163,11 +161,6 @@ bool classIsA(ClassMirror mirror, ClassMirror superclass) {
       mirror.superinterfaces.any((int) => classIsA(int, superclass));
 }
 
-// TODO(nweiz): get rid of this when issue 12826 is fixed.
-/// Returns whether or not [mirror] is an abstract class.
-bool isAbstract(ClassMirror mirror) => mirror.declarations.values
-    .any((member) => member is MethodMirror && member.isAbstract);
-
 /// Converts [transformerOrGroup] into a serializable map.
 Map _serializeTransformerOrGroup(transformerOrGroup) {
   if (transformerOrGroup is Transformer) {
@@ -187,8 +180,11 @@ Map _serializeTransformer(Transformer transformer) {
         return transformer.isPrimary(deserializeAsset(message['asset']));
       } else {
         assert(message['type'] == 'apply');
+
+        // Make sure we return null so that if the transformer's [apply] returns
+        // a non-serializable value it doesn't cause problems.
         return transformer.apply(
-            new ForeignTransform(message['transform']));
+            new ForeignTransform(message['transform'])).then((_) => null);
       }
     });
   });
@@ -321,22 +317,16 @@ class CrossIsolateException implements Exception {
   String toString() => "\$message\\n\$stackTrace";
 }
 
-// Get a string description of an exception.
-//
-// Most exception types have a "message" property. We prefer this since
-// it skips the "Exception:", "HttpException:", etc. prefix that calling
-// toString() adds. But, alas, "message" isn't actually defined in the
-// base Exception type so there's no easy way to know if it's available
-// short of a giant pile of type tests for each known exception type.
-//
-// So just try it. If it throws, default to toString().
-String getErrorMessage(error) {
-  try {
-    return error.message;
-  } on NoSuchMethodError catch (_) {
-    return error.toString();
-  }
-}
+/// A regular expression to match the exception prefix that some exceptions'
+/// [Object.toString] values contain.
+final _exceptionPrefix = new RegExp(r'^([A-Z][a-zA-Z]*)?(Exception|Error): ');
+
+/// Get a string description of an exception.
+///
+/// Many exceptions include the exception class name at the beginning of their
+/// [toString], so we remove that if it exists.
+String getErrorMessage(error) =>
+  error.toString().replaceFirst(_exceptionPrefix, '');
 
 /// Returns a buffered stream that will emit the same values as the stream
 /// returned by [future] once [future] completes. If [future] completes to an
@@ -373,14 +363,15 @@ Stream callbackStream(Stream callback()) {
 
 /// Load and return all transformers and groups from the library identified by
 /// [id].
-///
-/// [server] is used to serve any Dart files needed to load the transformers.
-Future<Set> loadTransformers(BarbackServer server, BarbackMode mode,
-    TransformerId id) {
-  return id.getAssetId(server.barback).then((assetId) {
+Future<Set> loadTransformers(BuildEnvironment environment, TransformerId id) {
+  return id.getAssetId(environment.barback).then((assetId) {
     var path = assetId.path.replaceFirst('lib/', '');
     // TODO(nweiz): load from a "package:" URI when issue 12474 is fixed.
-    var baseUrl = baseUrlForAddress(server.address, server.port);
+
+    // We could load the transformers from any server, since they all serve the
+    // packages' library files. We choose the first one arbitrarily.
+    var baseUrl = baseUrlForAddress(environment.servers.first.address,
+                                    environment.servers.first.port);
     var uri = '$baseUrl/packages/${id.package}/$path';
     var code = 'import "$uri";\n' +
         _TRANSFORMER_ISOLATE.replaceAll('<<URL_BASE>>', baseUrl);
@@ -392,11 +383,13 @@ Future<Set> loadTransformers(BarbackServer server, BarbackMode mode,
         .then((sendPort) {
       return _call(sendPort, {
         'library': uri,
-        'mode': mode.name,
+        'mode': environment.mode.name,
         // TODO(nweiz): support non-JSON-encodable configuration maps.
         'configuration': JSON.encode(id.configuration)
       }).then((transformers) {
-        transformers = transformers.map(_deserializeTransformerOrGroup).toSet();
+        transformers = transformers.map(
+            (transformer) => _deserializeTransformerOrGroup(transformer, id))
+            .toSet();
         log.fine("Transformers from $assetId: $transformers");
         return transformers;
       });
@@ -457,9 +450,10 @@ class _ForeignGroup implements TransformerGroup {
   /// The result of calling [toString] on the transformer group in the isolate.
   final String _toString;
 
-  _ForeignGroup(Map map)
+  _ForeignGroup(TransformerId id, Map map)
       : phases = map['phases'].map((phase) {
-          return phase.map(_deserializeTransformerOrGroup).toList();
+          return phase.map((transformer) => _deserializeTransformerOrGroup(
+              transformer, id)).toList();
         }).toList(),
         _toString = map['toString'];
 
@@ -467,10 +461,14 @@ class _ForeignGroup implements TransformerGroup {
 }
 
 /// Converts a serializable map into a [Transformer] or a [TransformerGroup].
-_deserializeTransformerOrGroup(Map map) {
-  if (map['type'] == 'Transformer') return new _ForeignTransformer(map);
+_deserializeTransformerOrGroup(Map map, TransformerId id) {
+  if (map['type'] == 'Transformer') {
+    var transformer = new _ForeignTransformer(map);
+    return ExcludingTransformer.wrap(transformer, id.includes, id.excludes);
+  }
+
   assert(map['type'] == 'TransformerGroup');
-  return new _ForeignGroup(map);
+  return new _ForeignGroup(id, map);
 }
 
 /// Converts [transform] into a serializable map.
@@ -492,6 +490,8 @@ Map _serializeTransform(Transform transform) {
       var method;
       if (message['level'] == 'Info') {
         method = transform.logger.info;
+      } else if (message['level'] == 'Fine') {
+        method = transform.logger.fine;
       } else if (message['level'] == 'Warning') {
         method = transform.logger.warning;
       } else {
@@ -542,7 +542,7 @@ Map _serializeId(AssetId id) => {'package': id.package, 'path': id.path};
 /// throws an error, that will also be sent.
 void _respond(wrappedMessage, callback(message)) {
   var replyTo = wrappedMessage['replyTo'];
-  new Future.sync(() => callback(wrappedMessage['message']))
+  syncFuture(() => callback(wrappedMessage['message']))
       .then((result) => replyTo.send({'type': 'success', 'value': result}))
       .catchError((error, stackTrace) {
     // TODO(nweiz): at least MissingInputException should be preserved here.
@@ -565,10 +565,11 @@ Future _call(SendPort port, message) {
     'replyTo': receivePort.sendPort
   });
 
-  return receivePort.first.then((response) {
+  return Chain.track(receivePort.first).then((response) {
     if (response['type'] == 'success') return response['value'];
     assert(response['type'] == 'error');
     return new Future.error(
-        new dart.CrossIsolateException.deserialize(response['error']));
+        new dart.CrossIsolateException.deserialize(response['error']),
+        new Chain.current());
   });
 }

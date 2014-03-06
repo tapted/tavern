@@ -15,6 +15,8 @@ import '../path_rep.dart';
 // Extension of the Archive files being used (tarball).
 const String ARCHIVE = "tar.gz";
 
+class OSError { }
+
 /// A collection of static methods for accessing important parts of the local
 /// filesystem.
 class FileSystem {
@@ -274,8 +276,16 @@ class IOSink {
   }
 }
 
+IOSink _stdin;
 IOSink _stdout;
 IOSink _stderr;
+
+IOSink get stdin {
+  if (_stdin == null) {
+    _stdin = new IOSink();
+  }
+  return _stdin;
+}
 
 IOSink get stdout {
   if (_stdout == null) {
@@ -305,7 +315,10 @@ StdioType stdioType(object) {
   return StdioType.PIPE;
 }
 
-class SocketException implements Exception {
+abstract class InternetAddress { }
+abstract class SocketException { }
+
+class getxception implements Exception {
   final String message;
   final OSError osError;
   final InternetAddress address;

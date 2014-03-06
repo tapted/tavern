@@ -4,6 +4,4 @@ class TransformerId {
 
 }
 
-Version get supportedVersion {
-  return new Version(0, 0, 1);
-}
+final supportedVersions = new VersionConstraint.parse(">=0.11.0 <0.13.0");
