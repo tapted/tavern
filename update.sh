@@ -15,5 +15,5 @@ echo 'Note that this does not `git pull` in bleeding_edge or check that it is cu
 # Don't touch the readme
 git checkout README.md
 git add --all
-git diff --stat
+git diff --stat HEAD
 echo 'Now `git commit`'
