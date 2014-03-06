@@ -316,9 +316,8 @@ StdioType stdioType(object) {
 }
 
 abstract class InternetAddress { }
-abstract class SocketException { }
 
-class getxception implements Exception {
+class SocketException implements Exception {
   final String message;
   final OSError osError;
   final InternetAddress address;
