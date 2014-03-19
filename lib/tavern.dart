@@ -18,17 +18,17 @@ typedef void LogFunction(String line, String level);
 /// the working directory [entry].
 Future getDependencies(html.DirectoryEntry entry, [LogFunction extraLog]) {
   // Turn on the maximum level of logging, and hook up any extra log function.
-  log.showAll();
+  log.showNormal();
   if (extraLog != null) log.addLoggerFunction(extraLog);
 
   // Store [entry] as the working directory.
   FileSystem.workingDir = new Directory(entry);
 
   return SystemCache.withSources(FileSystem.workingDirPath().join("cache"))
-      ..catchError((e) => log.error("Could not create system cache", e))
       .then((cache) => Entrypoint.load(FileSystem.workingDirPath(), cache))
       .then((entrypoint) => entrypoint.acquireDependencies())
-      .then((_) => log.fine("Got dependencies!"));
+      .then((_) => log.fine("Got dependencies!"))
+      .catchError((error) => log.error("Could not get dependencies", error));
 }
 
 Future<List<String>> getAvailablePackageList() {
