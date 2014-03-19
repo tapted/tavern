@@ -227,10 +227,11 @@ class Directory extends FileSystemEntity {
       }
       var path = getPath().join(zipFilename);
 
-      if (zipFile.size > 0)
+      if (zipFile.isFile) {
         return File.create(path).then((file) => file.write(zipFile.content));
-      else
+      } else {
         return Directory.create(path);
+      }
     });
   }
 }
