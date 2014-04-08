@@ -16,7 +16,7 @@ typedef void LogFunction(String line, String level);
 
 /// Gets the dependencies for the current project. The project is specified by
 /// the working directory [entry].
-Future getDependencies(html.DirectoryEntry entry, [LogFunction extraLog]) {
+Future getDependencies(html.DirectoryEntry entry, [LogFunction extraLog, bool upgradeAll=false]) {
   // Turn on the maximum level of logging, and hook up any extra log function.
   log.showNormal();
   if (extraLog != null) log.addLoggerFunction(extraLog);
@@ -26,7 +26,7 @@ Future getDependencies(html.DirectoryEntry entry, [LogFunction extraLog]) {
 
   return SystemCache.withSources(FileSystem.workingDirPath().join("cache"))
       .then((cache) => Entrypoint.load(FileSystem.workingDirPath(), cache))
-      .then((entrypoint) => entrypoint.acquireDependencies())
+      .then((entrypoint) => entrypoint.acquireDependencies(upgradeAll: upgradeAll))
       .then((_) => log.fine("Got dependencies!"))
       .catchError((error) => log.error("Could not get dependencies", error));
 }
@@ -34,3 +34,4 @@ Future getDependencies(html.DirectoryEntry entry, [LogFunction extraLog]) {
 Future<List<String>> getAvailablePackageList() {
   return HostedSource.getHostedPackages();
 }
+

@@ -227,9 +227,9 @@ Future deleteEntry(PathRep path) {
 /// "Cleans" [dir]. If that directory already exists, it will be deleted. Then a
 /// new empty directory will be created.
 Future cleanDir(PathRep dir) {
-  Directory.load(dir)
+  return Directory.load(dir)
       .then((dir) {
-        if (dir != null) dir.remove();
+        if (dir != null) return dir.remove();
       }).then((_) => Directory.create(dir));
 }
 
