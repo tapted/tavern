@@ -156,7 +156,7 @@ class HostedSource extends Source {
   void _throwFriendlyError(error, StackTrace stackTrace, String package,
       String url) {
     if (error is PubHttpException &&
-        error.response.statusCode == 404) {
+        error.statusCode == 404) {
       throw new PackageNotFoundException(
           "Could not find package $package at $url.", error, stackTrace);
     }

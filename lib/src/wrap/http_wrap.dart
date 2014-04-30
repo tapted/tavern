@@ -33,7 +33,7 @@ class PubHttpClient {
     if (request.status < 400 || request.status == 401) {
       completer.complete(request.response);
     } else {
-      completer.complete(new PubHttpException());
+     completer.completeError(new PubHttpException(request.status));
     }
   }
 
@@ -65,11 +65,11 @@ final httpClient = new PubHttpClient();
 
 /// Exception thrown when an HTTP operation fails.
 class PubHttpException implements Exception {
-  //final http.Response response;
 
-  const PubHttpException();//this.response)
-
-  String toString() => 'HTTP error';
-  //${response.statusCode}: '
-  //'${response.reasonPhrase}';
+  final int statusCode;
+  
+  const PubHttpException(this.statusCode);
+  
+  String toString() => 'Http Error: ${statusCode}';
+  
 }
