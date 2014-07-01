@@ -1,9 +1,12 @@
 name: tavern
-version: "0.0.5"
+version: 0.0.6
+homepage: https://github.com/tapted/tavern
+environment:
+  sdk: '>=1.0.0 <2.0.0'
 dependencies:
   archive: '>=1.0.16'
-  collection_helpers: any
   chrome: any
+  collection_helpers: any
   path: any
   range: any
   stack_trace: any

@@ -5,3 +5,4 @@ zip/
 packages/
 *packages*
 test/
+pubspec.lock
