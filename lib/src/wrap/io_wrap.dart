@@ -205,11 +205,12 @@ class Directory extends FileSystemEntity {
   }
 
   /// Extract the archive inside the current directory.
-  Future extractArchive(ByteBuffer data, {bool skipTopDir: false}) {
+  Future extractArchive(dynamic inData, {bool skipTopDir: false}) {
     log.message("Extracting zipped data to $path.");
 
-    Uint8List gzData = new Uint8List.view(data);
-    List<int> tarData = (new GZipDecoder()).decodeBytes(gzData);
+    // inData is a List (Uint8List) or a ByteBuffer.
+    List data = inData is List ? inData : new Uint8List.view(inData);
+    List<int> tarData = (new GZipDecoder()).decodeBytes(data);
     Archive archive = (new TarDecoder()).decodeBytes(tarData);
 
     return Future.forEach(archive.files, (ArchiveFile zipFile) {
