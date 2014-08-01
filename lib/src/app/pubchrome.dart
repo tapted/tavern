@@ -47,7 +47,7 @@ class PubChrome {
 
   /// Start the 'get' command for the currently selected working directory.
   void runGet(html.MouseEvent event) {
-    SystemCache.withSources(FileSystem.workingDir.path.join("cache"))
+    SystemCache.withSources(FileSystem.workingDir.path.join(".pub-cache"))
         ..catchError((e) => log.error("Could not create system cache", e))
         .then((cache) => Entrypoint.load(FileSystem.workingDir.path, cache))
         .then((entrypoint) => entrypoint.acquireDependencies())

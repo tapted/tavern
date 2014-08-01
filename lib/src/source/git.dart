@@ -60,7 +60,7 @@ class GitSource extends Source {
         log.io("Downloading ${id.name} ${id.version} from $url...");
 
         PathRep path = FileSystem.workingDir.path.join(
-            "cache", "git", id.name);
+            ".pub-cache", "git", id.name);
 
         return Future.wait([Directory.create(path),
                             httpClient.read(url, responseType: "arraybuffer")])
