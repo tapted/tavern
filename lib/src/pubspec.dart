@@ -41,7 +41,7 @@ class Pubspec {
   final Uri _location;
 
   /// In chrome apps the uri is of type chrome-extension://, so the relative path cannot
-  /// be computed using uri. The puspec path is used instead to resolve the relative path.
+  /// be computed using uri. The pubspec path is used instead to resolve the relative path.
   String _pubspecPath;
 
   /// All pubspec fields. This includes the fields from which other properties
