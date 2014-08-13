@@ -39,8 +39,8 @@ class Pubspec {
   /// This can be null if the pubspec was created in-memory or if its location
   /// is unknown or can't be represented by a Uri.
   final Uri _location;
-  
-  /// In chrome apps the uri is of type chrome-extension://, so the relative path cannot 
+
+  /// In chrome apps the uri is of type chrome-extension://, so the relative path cannot
   /// be computed using uri. The puspec path is used instead to resolve the relative path.
   String _pubspecPath;
 
@@ -222,7 +222,6 @@ class Pubspec {
       {String expectedName}) {
     var pubspecPath = packageDir.join('pubspec.yaml');
     var pubspecUri = pubspecPath.toUri();
-    
 
     return readTextFile(pubspecPath)
       .then((text) => new Pubspec.parse(
@@ -260,7 +259,7 @@ class Pubspec {
   Pubspec.fromMap(this.fields, this._sources, {String expectedName,
       Uri location, String path})
       : _location = location {
-    
+
     _pubspecPath = path;
     if (expectedName == null) return;
 
@@ -394,9 +393,9 @@ class Pubspec {
           if (_location != null && _isFileUri(_location)) {
             pubspecPath = path.fromUri(_location);
           } else if (_pubspecPath != null) {
-            pubspecPath = _pubspecPath; 
+            pubspecPath = _pubspecPath;
           }
-          
+
           description = _sources[sourceName].parseDescription(
               new PathRep(pubspecPath), description, fromLockFile: false);
         });

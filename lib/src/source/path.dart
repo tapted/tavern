@@ -15,7 +15,6 @@ import '../pubspec.dart';
 import '../source.dart';
 import '../utils.dart';
 
-
 /// A package [Source] that gets packages from a given local file path.
 class PathSource extends Source {
   final name = 'path';
