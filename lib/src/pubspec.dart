@@ -39,6 +39,10 @@ class Pubspec {
   /// This can be null if the pubspec was created in-memory or if its location
   /// is unknown or can't be represented by a Uri.
   final Uri _location;
+  
+  /// In chrome apps the uri is of type chrome-extension://, so the relative path cannot 
+  /// be computed using uri. The puspec path is used instead to resolve the relative path.
+  String _pubspecPath;
 
   /// All pubspec fields. This includes the fields from which other properties
   /// are derived.
@@ -218,10 +222,11 @@ class Pubspec {
       {String expectedName}) {
     var pubspecPath = packageDir.join('pubspec.yaml');
     var pubspecUri = pubspecPath.toUri();
+    
 
     return readTextFile(pubspecPath)
       .then((text) => new Pubspec.parse(
-          text, sources, expectedName: expectedName, location: pubspecUri))
+          text, sources, expectedName: expectedName, location: pubspecUri, path: pubspecPath.fullPath))
       .catchError((e) => throw new PubspecException(expectedName, pubspecUri,
           'Could not find a file named "pubspec.yaml" in "$packageDir".'));
   }
@@ -237,6 +242,7 @@ class Pubspec {
     : _sources = null,
       _location = null,
       _name = null,
+      _pubspecPath = null,
       _version = Version.none,
       _dependencies = <PackageDep>[],
       _devDependencies = <PackageDep>[],
@@ -252,8 +258,10 @@ class Pubspec {
   ///
   /// [location] is the location from which this pubspec was loaded.
   Pubspec.fromMap(this.fields, this._sources, {String expectedName,
-      Uri location})
+      Uri location, String path})
       : _location = location {
+    
+    _pubspecPath = path;
     if (expectedName == null) return;
 
     // If [expectedName] is passed, ensure that the actual 'name' field exists
@@ -285,7 +293,7 @@ class Pubspec {
   /// [filePath] may be `null` if the pubspec is not on the user's local
   /// file system.
   factory Pubspec.parse(String contents, SourceRegistry sources,
-      {String expectedName, Uri location}) {
+      {String expectedName, Uri location, String path}) {
     if (contents.trim() == '') return new Pubspec.empty();
 
     var parsedPubspec = loadYaml(contents);
@@ -297,7 +305,7 @@ class Pubspec {
     }
 
     return new Pubspec.fromMap(parsedPubspec, sources,
-        expectedName: expectedName, location: location);
+        expectedName: expectedName, location: location, path: path);
   }
 
   /// Returns a list of most errors in this pubspec.
@@ -385,9 +393,12 @@ class Pubspec {
           var pubspecPath;
           if (_location != null && _isFileUri(_location)) {
             pubspecPath = path.fromUri(_location);
+          } else if (_pubspecPath != null) {
+            pubspecPath = _pubspecPath; 
           }
+          
           description = _sources[sourceName].parseDescription(
-              pubspecPath, description, fromLockFile: false);
+              new PathRep(pubspecPath), description, fromLockFile: false);
         });
       }
 

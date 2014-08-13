@@ -10,9 +10,11 @@ import 'package:path/path.dart' as path;
 
 import '../io.dart';
 import '../package.dart';
+import '../path_rep.dart';
 import '../pubspec.dart';
 import '../source.dart';
 import '../utils.dart';
+
 
 /// A package [Source] that gets packages from a given local file path.
 class PathSource extends Source {
@@ -21,35 +23,38 @@ class PathSource extends Source {
 
   Future<Pubspec> describeUncached(PackageId id) {
     return syncFuture(() {
-      var dir = _validatePath(id.name, id.description);
-      return new Pubspec.load(dir, systemCache.sources,
+      return  _validatePath(id.name, id.description).then((dir) {
+        return Pubspec.load(dir, systemCache.sources,
           expectedName: id.name);
+      });
     });
   }
 
   bool descriptionsEqual(description1, description2) {
     // Compare real paths after normalizing and resolving symlinks.
-    var path1 = canonicalize(description1["path"]);
-    var path2 = canonicalize(description2["path"]);
+    var path1 = canonicalize(new PathRep(description1["path"]));
+    var path2 = canonicalize(new PathRep(description2["path"]));
     return path1 == path2;
   }
 
-  Future<bool> get(PackageId id, String destination) {
+  Future<bool> get(PackageId id, PathRep destination) {
     return syncFuture(() {
       try {
-        var dir = _validatePath(id.name, id.description);
-        createPackageSymlink(id.name, dir, destination,
-            relative: id.description["relative"]);
+        return _validatePath(id.name, id.description).then((dirName) {
+          return createPackageSymlink(id.name, dirName, destination,
+            relative: id.description["relative"]).then((dir) {
+              if (dir != null)
+                return true;
+              else false;
+          });
+        });
       } on FormatException catch(err) {
         return false;
       }
-
-      return true;
     });
   }
 
-  Future<String> getDirectory(PackageId id) =>
-      newFuture(() => _validatePath(id.name, id.description));
+  Future<PathRep> getDirectory(PackageId id) => _validatePath(id.name, id.description);
 
   /// Parses a path dependency. This takes in a path string and returns a map.
   /// The "path" key will be the original path but resolved relative to the
@@ -58,7 +63,7 @@ class PathSource extends Source {
   ///
   /// A path coming from a pubspec is a simple string. From a lock file, it's
   /// an expanded {"path": ..., "relative": ...} map.
-  dynamic parseDescription(String containingPath, description,
+  dynamic parseDescription(PathRep containingPath, description,
                            {bool fromLockFile: false}) {
     if (fromLockFile) {
       if (description is! Map) {
@@ -88,10 +93,11 @@ class PathSource extends Source {
     if (path.isRelative(description)) {
       // Can't handle relative paths coming from pubspecs that are not on the
       // local file system.
-      assert(containingPath != null);
-
-      description = path.normalize(
-          path.join(path.dirname(containingPath), description));
+      //assert(containingPath != null);
+      if (containingPath != null) {
+        description = path.normalize(
+            path.join(path.dirname(containingPath.fullPath), description));
+      }
     }
 
     return {
@@ -103,10 +109,10 @@ class PathSource extends Source {
   /// Serializes path dependency's [description]. For the descriptions where
   /// `relative` attribute is `true`, tries to make `path` relative to the
   /// specified [containingPath].
-  dynamic serializeDescription(String containingPath, description) {
+  dynamic serializeDescription(PathRep containingPath, description) {
     if (description["relative"]) {
       return {
-        "path": path.relative(description['path'], from: containingPath),
+        "path": path.relative(description['path'], from: containingPath.fullPath),
         "relative": true
       };
     }
@@ -114,10 +120,10 @@ class PathSource extends Source {
   }
 
   /// Converts a parsed relative path to its original relative form.
-  String formatDescription(String containingPath, description) {
+  String formatDescription(PathRep containingPath, description) {
     var sourcePath = description["path"];
     if (description["relative"]) {
-      sourcePath = path.relative(description['path'], from: containingPath);
+      sourcePath = path.relative(description['path'], from: containingPath.fullPath);
     }
 
     return sourcePath;
@@ -129,17 +135,14 @@ class PathSource extends Source {
   /// It must be a map, with a "path" key containing a path that points to an
   /// existing directory. Throws an [ApplicationException] if the path is
   /// invalid.
-  String _validatePath(String name, description) {
+  Future<PathRep> _validatePath(String name, description) {
     var dir = description["path"];
 
-    if (dirExists(dir)) return dir;
-
-    if (fileExists(dir)) {
-      fail('Path dependency for package $name must refer to a directory, '
-           'not a file. Was "$dir".');
-    }
-
-    throw new PackageNotFoundException(
-        'Could not find package $name at "$dir".');
+    return dirExists(new PathRep(dir)).then((result) {
+      if (result)
+        return new PathRep(dir);
+          throw new PackageNotFoundException(
+                 'Could not find package $name at "$dir".');
+      });
   }
 }
