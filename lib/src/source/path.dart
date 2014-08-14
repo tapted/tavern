@@ -92,11 +92,10 @@ class PathSource extends Source {
     if (path.isRelative(description)) {
       // Can't handle relative paths coming from pubspecs that are not on the
       // local file system.
-      //assert(containingPath != null);
-      if (containingPath != null) {
-        description = path.normalize(
-            path.join(path.dirname(containingPath.fullPath), description));
-      }
+      assert(containingPath != null);
+      description = path.normalize(
+         path.join(path.dirname(containingPath.fullPath), description));
+
     }
 
     return {
