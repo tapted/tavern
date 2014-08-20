@@ -362,6 +362,8 @@ class Pubspec {
         versionConstraint = _parseVersionConstraint(spec, "$field.$name");
       } else if (spec is Map) {
         if (spec.containsKey('version')) {
+          // Don't write to the immutable YAML map.
+          spec = new Map.from(spec);
           versionConstraint = _parseVersionConstraint(spec.remove('version'),
               "$field.$name.version");
         }
