@@ -496,7 +496,7 @@ class Traverser {
         }
       }
 
-      return _traverseDeps(id.name, new DependencyQueue(_solver, deps));
+      return _traverseDeps(id, new DependencyQueue(_solver, deps));
     });
   }
 
@@ -505,70 +505,88 @@ class Traverser {
   /// Desctructively modifies [deps]. Completes to a list of packages if the
   /// traversal is complete. Completes it to an error if a failure occurred.
   /// Otherwise, recurses.
-  Future<List<PackageId>> _traverseDeps(String depender, DependencyQueue deps) {
+  Future<List<PackageId>> _traverseDeps(PackageId depender,
+      DependencyQueue deps) {
     // Move onto the next package if we've traversed all of these references.
     if (deps.isEmpty) return _traversePackage();
 
     return resetStack(() {
       return deps.advance().then((dep) {
-        _validateDependency(dep, depender);
-
-        // Add the dependency.
-        var dependencies = _getDependencies(dep.name);
-        dependencies.add(new Dependency(depender, dep));
-
-        // If the package is barback, pub has an implicit version constraint on
-        // it since pub itself uses barback too. Note that we don't check for
-        // the hosted source here because we still want to do this even when
-        // people on the Dart team are on the bleeding edge and have a path
-        // dependency on the tip version of barback in the Dart repo.
-        //
-        // The length check here is to ensure we only add the barback
-        // dependency once.
-        if (dep.name == "barback" && dependencies.length == 1) {
-          _solver.logSolve('add implicit ${barback.supportedVersions} pub '
-              'dependency on barback');
-
-          // Use the same source and description as the explicit dependency.
-          // That way, this doesn't fail with a source/desc conflict if users
-          // (like Dart team members) use things like a path dependency to
-          // find barback.
-          var barbackDep = new PackageDep(dep.name, dep.source,
-              barback.supportedVersions, dep.description);
-          dependencies.add(new Dependency("pub itself", barbackDep));
-        }
-
-        var constraint = _getConstraint(dep.name);
-
-        // See if it's possible for a package to match that constraint.
-        if (constraint.isEmpty) {
-          var constraints = _getDependencies(dep.name)
-              .map((dep) => "  ${dep.dep.constraint} from ${dep.depender}")
-              .join('\n');
-          _solver.logSolve(
-              'disjoint constraints on ${dep.name}:\n$constraints');
-          throw new DisjointConstraintException(dep.name, dependencies);
-        }
-
-        var selected = _validateSelected(dep, constraint);
-        if (selected != null) {
-          // The selected package version is good, so enqueue it to traverse
-          // into it.
-          _packages.add(selected);
-          return _traverseDeps(depender, deps);
-        }
-
-        // We haven't selected a version. Try all of the versions that match
-        // the constraints we currently have for this package.
-        var locked = _getValidLocked(dep.name);
-
-        return VersionQueue.create(locked,
-            () => _getAllowedVersions(dep)).then((versions) {
-          _packages.add(_solver.select(versions));
+        var dependency = new Dependency(depender.name, dep);
+        return _registerDependency(dependency).then((_) {
+          if (dep.name == "barback") return _addImplicitDependencies();
         });
       }).then((_) => _traverseDeps(depender, deps));
     });
   }
+
+  /// Register pub's implicit dependencies.
+   ///
+   /// Pub has an implicit version constraint on barback and various other
+   /// packages used in barback's plugin isolate.
+   Future _addImplicitDependencies() {
+     /// Ensure we only add the barback dependency once.
+     if (_getDependencies("barback").length != 1) return new Future.value();
+
+     return Future.wait(barback.pubConstraints.keys.map((depName) {
+       var constraint = barback.pubConstraints[depName];
+       _solver.logSolve('add implicit $constraint pub dependency on '
+           '$depName');
+
+       var override = _solver._overrides[depName];
+
+       // Use the same source and description as the dependency override if one
+       // exists. This is mainly used by the pkgbuild tests, which use dependency
+       // overrides for all repo packages.
+       var pubDep = override == null ?
+           new PackageDep(depName, "hosted", constraint, depName) :
+           override.withConstraint(constraint);
+       return _registerDependency(
+           new Dependency("pub itself", pubDep));
+     }));
+   }
+
+  /// Register [dependency]'s constraints on the package it depends on and
+  /// enqueues the package for processing if necessary.
+  Future _registerDependency(Dependency dependency) {
+    return syncFuture(() {
+      _validateDependency(dependency);
+
+      var dep = dependency.dep;
+      var dependencies = _getDependencies(dep.name);
+      dependencies.add(dependency);
+
+      var constraint = _getConstraint(dep.name);
+
+      // See if it's possible for a package to match that constraint.
+      if (constraint.isEmpty) {
+        var constraints = dependencies
+            .map((dep) => "  ${dep.dep.constraint} from ${dep.depender}")
+            .join('\n');
+        _solver.logSolve(
+            'disjoint constraints on ${dep.name}:\n$constraints');
+        throw new DisjointConstraintException(dep.name, dependencies);
+      }
+
+      var selected = _validateSelected(dep, constraint);
+      if (selected != null) {
+        // The selected package version is good, so enqueue it to traverse
+        // into it.
+        _packages.add(selected);
+        return null;
+      }
+
+      // We haven't selected a version. Try all of the versions that match
+      // the constraints we currently have for this package.
+      var locked = _getValidLocked(dep.name);
+
+      return VersionQueue.create(locked, () {
+        return _getAllowedVersions(dep);
+      }).then((versions) => _packages.add(_solver.select(versions)));
+    });
+  }
+
+
 
   /// Gets all versions of [dep] that match the current constraints placed on
   /// it.
@@ -606,10 +624,13 @@ class Traverser {
   }
 
   /// Ensures that dependency [dep] from [depender] is consistent with the
-  /// other dependencies on the same package. Throws a [SolveFailure]
-  /// exception if not. Only validates sources and descriptions, not the
-  /// version.
-  void _validateDependency(PackageDep dep, String depender) {
+  /// other dependencies on the same package.
+  ///
+  /// Throws a [SolveFailure] exception if not. Only validates sources and
+  /// descriptions, not the version.
+  void _validateDependency(Dependency dependency) {
+    var dep = dependency.dep;
+
     // Make sure the dependencies agree on source and description.
     var required = _getRequired(dep.name);
     if (required == null) return;
@@ -618,8 +639,7 @@ class Traverser {
     if (required.dep.source != dep.source) {
       _solver.logSolve('source mismatch on ${dep.name}: ${required.dep.source} '
                        '!= ${dep.source}');
-      throw new SourceMismatchException(dep.name,
-          [required, new Dependency(depender, dep)]);
+      throw new SourceMismatchException(dep.name, [required, dependency]);
     }
 
     // Make sure all of the existing descriptions match the new reference.
@@ -627,8 +647,7 @@ class Traverser {
     if (!source.descriptionsEqual(dep.description, required.dep.description)) {
       _solver.logSolve('description mismatch on ${dep.name}: '
                        '${required.dep.description} != ${dep.description}');
-      throw new DescriptionMismatchException(dep.name,
-          [required, new Dependency(depender, dep)]);
+      throw new DescriptionMismatchException(dep.name, [required, dependency]);
     }
   }
 
