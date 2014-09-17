@@ -521,30 +521,29 @@ class Traverser {
   }
 
   /// Register pub's implicit dependencies.
-   ///
-   /// Pub has an implicit version constraint on barback and various other
-   /// packages used in barback's plugin isolate.
-   Future _addImplicitDependencies() {
-     /// Ensure we only add the barback dependency once.
-     if (_getDependencies("barback").length != 1) return new Future.value();
+  ///
+  /// Pub has an implicit version constraint on barback and various other
+  /// packages used in barback's plugin isolate.
+  Future _addImplicitDependencies() {
+    /// Ensure we only add the barback dependency once.
+    if (_getDependencies("barback").length != 1) return new Future.value();
 
-     return Future.wait(barback.pubConstraints.keys.map((depName) {
-       var constraint = barback.pubConstraints[depName];
-       _solver.logSolve('add implicit $constraint pub dependency on '
-           '$depName');
+    return Future.wait(barback.pubConstraints.keys.map((depName) {
+      var constraint = barback.pubConstraints[depName];
+      _solver.logSolve('add implicit $constraint pub dependency on '
+          '$depName');
+      var override = _solver._overrides[depName];
 
-       var override = _solver._overrides[depName];
-
-       // Use the same source and description as the dependency override if one
-       // exists. This is mainly used by the pkgbuild tests, which use dependency
-       // overrides for all repo packages.
-       var pubDep = override == null ?
-           new PackageDep(depName, "hosted", constraint, depName) :
-           override.withConstraint(constraint);
-       return _registerDependency(
-           new Dependency("pub itself", pubDep));
-     }));
-   }
+      // Use the same source and description as the dependency override if one
+      // exists. This is mainly used by the pkgbuild tests, which use dependency
+      // overrides for all repo packages.
+      var pubDep = override == null ?
+          new PackageDep(depName, "hosted", constraint, depName) :
+          override.withConstraint(constraint);
+      return _registerDependency(
+          new Dependency("pub itself", pubDep));
+    }));
+  }
 
   /// Register [dependency]'s constraints on the package it depends on and
   /// enqueues the package for processing if necessary.
