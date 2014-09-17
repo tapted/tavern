@@ -31,9 +31,13 @@ class PathSource extends Source {
 
   bool descriptionsEqual(description1, description2) {
     // Compare real paths after normalizing and resolving symlinks.
+    // TODO(keertip): fix canonicalize to return a string,
+    // right now it just returns the path
     var path1 = canonicalize(new PathRep(description1["path"]));
     var path2 = canonicalize(new PathRep(description2["path"]));
-    return path1 == path2;
+    // TODO(keertip): uncomment once canonicalize is fixed
+    //return path1 == path2;
+    return path1.fullPath == path2.fullPath;
   }
 
   Future<bool> get(PackageId id, PathRep destination) {
