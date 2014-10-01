@@ -1,5 +1,5 @@
 name: tavern
-version: 0.0.9
+version: 0.0.10
 homepage: https://github.com/tapted/tavern
 environment:
   sdk: '>=1.0.0 <2.0.0'
